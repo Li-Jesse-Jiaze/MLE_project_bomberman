@@ -6,6 +6,18 @@ from typing import List
 import events as e
 from .callbacks import state_to_features
 
+import torch
+from torch import nn
+import torch.optim as optim
+import torch.nn.functional as F
+import random
+import os
+import numpy as np
+from matplotlib import pyplot as plt
+import time
+
+ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
+
 # This is only an example!
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
@@ -16,6 +28,74 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
+
+class BasicLayer(nn.Module):
+    """
+    Basic Convolutional Layer: Consists of Conv2d -> BatchNorm -> ReLU
+    """
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=False):
+        super(BasicLayer, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=bias)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return self.relu(x)
+
+
+class DQN(nn.Module):
+    """
+    DQN with Skip Connections: This model processes the input feature matrix and predicts Q-values for different actions.
+    """
+    def __init__(self, input_shape, num_actions):
+        super(DQN, self).__init__()
+        self.input_shape = input_shape  # Example: (7, 7, 6)
+        self.num_actions = num_actions  # Number of actions
+
+        # Defining convolutional layers
+        self.conv1 = BasicLayer(6, 16, kernel_size=3, padding=1)
+        self.conv2 = BasicLayer(16, 32, kernel_size=3, padding=1)
+        self.conv3 = BasicLayer(32, 64, kernel_size=3, padding=1)
+
+        # Skip connection: Process input directly to later layer
+        self.skip = nn.Sequential(
+            nn.Conv2d(6, 64, kernel_size=1),  # 1x1 convolution for channel alignment
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+
+        # Compute the output size after convolution layers
+        self.conv_output_size = self._get_conv_out(input_shape)
+
+        # Fully connected layers
+        self.fc1 = nn.Linear(self.conv_output_size, 128)
+        self.fc2 = nn.Linear(128, num_actions)
+
+    def _get_conv_out(self, shape):
+        o = self.conv1(torch.zeros(1, *shape).permute(0, 3, 1, 2))
+        o = self.conv2(o)
+        o = self.conv3(o)
+        return int(np.prod(o.size()))
+
+    def forward(self, x):
+        # Applying skip connection
+        skip_out = self.skip(x)
+
+        # Passing through convolutional layers
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = self.conv3(x)
+        
+        # Combining with skip connection
+        x = x + skip_out
+        
+        x = x.view(x.size(0), -1)  # Flatten
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        x = F.softmax(x)
+        return x
 
 
 def setup_training(self):
@@ -28,7 +108,24 @@ def setup_training(self):
     """
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
+    num_actions = 6
+
+    # setup device
+    global device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if self.train and os.path.isfile("my-saved-model_mse_rms.pt"):
+        with open("my-saved-model_mse_rms.pt", "rb") as file:
+            self.policy_net = pickle.load(file).to(device)
+
+    else:
+        self.policy_net = DQN((7, 7, 6), num_actions).to(device)
+
+    self.target_net = DQN((7, 7, 6), num_actions).to(device)
+    self.target_net.load_state_dict(self.policy_net.state_dict())
+
+    self.optimizer = optim.RMSprop(self.policy_net.parameters(), lr=1e-3, centered=True)
+    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE) # TODO: 更好的 memory 利用对称性
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):

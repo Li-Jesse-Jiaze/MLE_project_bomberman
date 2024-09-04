@@ -23,8 +23,13 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 # Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 3  # keep only ... last transitions
+TRANSITION_HISTORY_SIZE = 5120  # keep only ... last transitions
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
+
+BATCH_SIZE = 256
+GAMMA = 0.5
+TAU = 0.05
+LR = 1e-3
 
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
@@ -33,7 +38,7 @@ class BasicLayer(nn.Module):
     """
     Basic Convolutional Layer: Consists of Conv2d -> BatchNorm -> ReLU
     """
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=False):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=True):
         super(BasicLayer, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=bias)
         self.bn = nn.BatchNorm2d(out_channels)
@@ -84,8 +89,8 @@ class DQN(nn.Module):
         skip_out = self.skip(x)
 
         # Passing through convolutional layers
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
+        x = self.conv1(x)
+        x = self.conv2(x)
         x = self.conv3(x)
         
         # Combining with skip connection
@@ -94,7 +99,6 @@ class DQN(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
-        x = F.softmax(x)
         return x
 
 
@@ -114,8 +118,8 @@ def setup_training(self):
     global device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if self.train and os.path.isfile("my-saved-model_mse_rms.pt"):
-        with open("my-saved-model_mse_rms.pt", "rb") as file:
+    if self.train and os.path.isfile("my-saved-model.pt"):
+        with open("my-saved-model.pt", "rb") as file:
             self.policy_net = pickle.load(file).to(device)
 
     else:
@@ -125,7 +129,42 @@ def setup_training(self):
     self.target_net.load_state_dict(self.policy_net.state_dict())
 
     self.optimizer = optim.RMSprop(self.policy_net.parameters(), lr=1e-3, centered=True)
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE) # TODO: 更好的 memory 利用对称性
+    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
+
+
+# Action rotation mapping (for 0, 90, 180, 270 degrees)
+ROTATION_MAPPING = {
+    0: {'UP': 'UP', 'RIGHT': 'RIGHT', 'DOWN': 'DOWN', 'LEFT': 'LEFT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
+    90: {'UP': 'RIGHT', 'RIGHT': 'DOWN', 'DOWN': 'LEFT', 'LEFT': 'UP', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
+    180: {'UP': 'DOWN', 'RIGHT': 'LEFT', 'DOWN': 'UP', 'LEFT': 'RIGHT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
+    270: {'UP': 'LEFT', 'RIGHT': 'UP', 'DOWN': 'RIGHT', 'LEFT': 'DOWN', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
+}
+
+# Action flipping mapping (for horizontal and vertical flips)
+HORIZONTAL_FLIP_MAPPING = {'UP': 'DOWN', 'RIGHT': 'RIGHT', 'DOWN': 'UP', 'LEFT': 'LEFT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
+VERTICAL_FLIP_MAPPING = {'UP': 'UP', 'RIGHT': 'LEFT', 'DOWN': 'DOWN', 'LEFT': 'RIGHT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
+
+# Function to adjust action based on rotation and flip
+def adjust_action(action, rotation=0, flip_horizontal=False, flip_vertical=False):
+    # Adjust action based on rotation
+    action = ROTATION_MAPPING[rotation][action]
+    if flip_horizontal:
+        action = HORIZONTAL_FLIP_MAPPING[action]
+    if flip_vertical:
+        action = VERTICAL_FLIP_MAPPING[action]
+
+    return action
+
+# Function to adjust the state (rotate and flip) while considering C x H x W format
+def adjust_state(state, rotation=0, flip_horizontal=False, flip_vertical=False):
+    if rotation != 0:
+        state = np.rot90(state, k=rotation // 90, axes=(1, 2))
+    if flip_horizontal:
+        state = np.flip(state, axis=2)
+    if flip_vertical:
+        state = np.flip(state, axis=1)
+
+    return state
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -147,12 +186,36 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
-    # Idea: Add your own events to hand out rewards
-    if ...:
-        events.append(PLACEHOLDER_EVENT)
+    # # Idea: Add your own events to hand out rewards
+    # if ...:
+    #     events.append(PLACEHOLDER_EVENT)
 
-    # state_to_features is defined in callbacks.py
-    self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
+    # Precompute features to avoid repetitive state_to_features calls
+    old_features = state_to_features(old_game_state)
+    new_features = state_to_features(new_game_state)
+
+    # Define all transformation combinations (rotation, horizontal flip, vertical flip)
+    rotation_angles = [0, 90, 180, 270]
+    flip_combinations = [(False, False), (True, False), (False, True)]  # (horizontal_flip, vertical_flip)
+
+    # Iterate through each rotation angle
+    for rotation in rotation_angles:
+        # Iterate through each flip combination
+        for flip_horizontal, flip_vertical in flip_combinations:
+            # Adjust the state based on rotation and flip
+            adjusted_old_state = adjust_state(old_features, rotation, flip_horizontal, flip_vertical)
+            adjusted_new_state = adjust_state(new_features, rotation, flip_horizontal, flip_vertical)
+            
+            # Adjust the action based on rotation and flip
+            adjusted_action = adjust_action(self_action, rotation, flip_horizontal, flip_vertical)
+
+            # Append the augmented transition to the queue
+            self.transitions.append(Transition(
+                torch.Tensor(adjusted_old_state.copy()).type('torch.FloatTensor').to(device),
+                torch.Tensor([[ACTIONS.index(adjusted_action)]]).to(torch.int64).to(device),
+                torch.Tensor(adjusted_new_state.copy()).type('torch.FloatTensor').to(device),
+                torch.Tensor([reward_from_events(self, events)]).type('torch.FloatTensor').to(device)
+            ))
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
@@ -169,11 +232,47 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
+    self.transitions.append(Transition(
+        torch.Tensor(state_to_features(last_game_state)).type('torch.FloatTensor').to(device), 
+        torch.Tensor([[ACTIONS.index(last_action)]]).to(torch.int64).to(device), 
+        torch.zeros_like(torch.Tensor(state_to_features(last_game_state))).type('torch.FloatTensor').to(device), 
+        torch.Tensor([reward_from_events(self, events)]).type('torch.FloatTensor').to(device)
+        ))
+
+    batch_size = min(BATCH_SIZE, len(self.transitions))
+    selected_transitions = random.sample(self.transitions, batch_size)
+    batch_data = Transition(*zip(*selected_transitions))
+    action_batch = torch.cat(batch_data.action)
+    reward_batch = torch.cat(batch_data.reward)
+    state_batch = torch.stack(batch_data.state)
+    next_state_batch = torch.stack(batch_data.next_state)
+
+    state_values = self.policy_net(state_batch)
+    state_values = state_values.gather(1, action_batch)
+    with torch.no_grad():
+        next_state_values = self.target_net(next_state_batch)
+    next_state_values = next_state_values.max(1)[0]
+    expected_state_values = (next_state_values * GAMMA) + reward_batch
+    
+    criterion = nn.MSELoss()
+    loss = criterion(state_values, expected_state_values.unsqueeze(1))
+
+    # Optimize the model
+    self.optimizer.zero_grad()
+    loss.backward()
+    # In-place gradient clipping
+    torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+    self.optimizer.step()
+
+    target_net_state_dict = self.target_net.state_dict()
+    policy_net_state_dict = self.policy_net.state_dict()
+    for key in policy_net_state_dict:
+        target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+    self.target_net.load_state_dict(target_net_state_dict)
 
     # Store the model
     with open("my-saved-model.pt", "wb") as file:
-        pickle.dump(self.model, file)
+        pickle.dump(self.policy_net, file)
 
 
 def reward_from_events(self, events: List[str]) -> int:
@@ -184,9 +283,14 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 1,
-        e.KILLED_OPPONENT: 5,
-        PLACEHOLDER_EVENT: -.1  # idea: the custom event is bad
+        e.COIN_COLLECTED: 10,
+        e.INVALID_ACTION: -5, 
+        e.CRATE_DESTROYED: 8,
+        e.GOT_KILLED: -30,
+        e.KILLED_OPPONENT: 50,
+        e.KILLED_SELF: -40,
+        e.SURVIVED_ROUND: 10,
+        e.WAITED: -1,
     }
     reward_sum = 0
     for event in events:

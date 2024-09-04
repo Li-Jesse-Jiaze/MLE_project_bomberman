@@ -54,7 +54,7 @@ def act(self, game_state: dict) -> str:
             return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
         else:
             self.logger.debug("Choosing action based on policy_net.")
-            return ACTIONS[torch.multinomial(self.policy_net(f_state)[0], 1)[0]]
+            return ACTIONS[torch.argmax(self.policy_net(f_state)[0])]
     
     p_action = self.model(f_state)[0]
     i = 1
@@ -64,13 +64,13 @@ def act(self, game_state: dict) -> str:
             break
         i += 1
 
-    self.logger.debug("Querying model for action.")
+    self.logger.debug(f"Querying model for action {ACTIONS[action_idx]}.")
     return ACTIONS[action_idx]
 
 
 def check_inv_action(game_state: dict, action: str) -> bool:
     field = game_state["field"]
-    my_pos = game_state["self"][3]
+    my_pos = game_state["self"][-1]
 
     # Map each action to its corresponding position adjustment
     move_offsets = {
@@ -89,9 +89,6 @@ def check_inv_action(game_state: dict, action: str) -> bool:
     return True
 
 def state_to_features(game_state: dict, reach: int = 3) -> np.array:
-    if game_state is None:
-        return None
-
     field = game_state["field"]
     bombs = game_state["bombs"]
     explosion_map = game_state["explosion_map"]
@@ -99,7 +96,7 @@ def state_to_features(game_state: dict, reach: int = 3) -> np.array:
     agent = game_state["self"]
     others = [o[3] for o in game_state["others"]]  # Extract other agents' positions
 
-    my_pos = np.array(agent[3])
+    my_pos = np.array(agent[-1])
 
     # Generate a matrix of positions around the player
     vision_range = np.arange(-reach, reach + 1)

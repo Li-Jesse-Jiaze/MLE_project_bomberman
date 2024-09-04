@@ -23,10 +23,10 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 # Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 5120  # keep only ... last transitions
+TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
-BATCH_SIZE = 256
+BATCH_SIZE = 512
 GAMMA = 0.5
 TAU = 0.05
 LR = 1e-3
@@ -123,9 +123,9 @@ def setup_training(self):
             self.policy_net = pickle.load(file).to(device)
 
     else:
-        self.policy_net = DQN((7, 7, 6), num_actions).to(device)
+        self.policy_net = DQN((31, 31, 6), num_actions).to(device)
 
-    self.target_net = DQN((7, 7, 6), num_actions).to(device)
+    self.target_net = DQN((31, 31, 6), num_actions).to(device)
     self.target_net.load_state_dict(self.policy_net.state_dict())
 
     self.optimizer = optim.RMSprop(self.policy_net.parameters(), lr=1e-3, centered=True)
@@ -193,6 +193,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Precompute features to avoid repetitive state_to_features calls
     old_features = state_to_features(old_game_state)
     new_features = state_to_features(new_game_state)
+    reward = reward_from_events(self, events)
 
     # Define all transformation combinations (rotation, horizontal flip, vertical flip)
     rotation_angles = [0, 90, 180, 270]
@@ -214,7 +215,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 torch.Tensor(adjusted_old_state.copy()).type('torch.FloatTensor').to(device),
                 torch.Tensor([[ACTIONS.index(adjusted_action)]]).to(torch.int64).to(device),
                 torch.Tensor(adjusted_new_state.copy()).type('torch.FloatTensor').to(device),
-                torch.Tensor([reward_from_events(self, events)]).type('torch.FloatTensor').to(device)
+                torch.Tensor([reward]).type('torch.FloatTensor').to(device)
             ))
 
 

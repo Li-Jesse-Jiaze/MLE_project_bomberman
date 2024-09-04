@@ -46,7 +46,7 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     f_state = torch.tensor(state_to_features(game_state), device=device, dtype=torch.float).unsqueeze(0)
-    random_prob = .1
+    random_prob = .2
     if self.train:
         if random.random() < random_prob:
             self.logger.debug("Choosing action purely at random.")
@@ -88,7 +88,7 @@ def check_inv_action(game_state: dict, action: str) -> bool:
             return False
     return True
 
-def state_to_features(game_state: dict, reach: int = 3) -> np.array:
+def state_to_features(game_state: dict, reach: int = 15) -> np.array:
     field = game_state["field"]
     bombs = game_state["bombs"]
     explosion_map = game_state["explosion_map"]

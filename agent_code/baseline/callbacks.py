@@ -3,6 +3,7 @@ import pickle
 import random
 
 import numpy as np
+np.set_printoptions(linewidth=np.inf)
 import torch
 
 
@@ -49,9 +50,10 @@ def act(self, game_state: dict) -> str:
     random_prob = .2
     if self.train:
         if random.random() < random_prob:
-            self.logger.debug("Choosing action purely at random.")
-            # 80%: walk in any direction. 10% wait. 10% bomb.
-            return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
+            self.logger.debug("Choosing action based on Max-Boltzmann strategy.")
+            logits = self.policy_net(f_state)[0]
+            probabilities = torch.softmax(logits, dim=0).cpu().detach().numpy()  # Softmax to convert scores to probabilities
+            return np.random.choice(ACTIONS, p=probabilities)
         else:
             self.logger.debug("Choosing action based on policy_net.")
             return ACTIONS[torch.argmax(self.policy_net(f_state)[0])]
@@ -69,34 +71,46 @@ def act(self, game_state: dict) -> str:
 
 
 def check_inv_action(game_state: dict, action: str) -> bool:
-    field = game_state["field"]
-    my_pos = game_state["self"][-1]
+    # Gather information about the game state
+    arena = game_state["field"]
+    _, score, bombs_left, (x, y) = game_state["self"]
+    bombs = game_state["bombs"]
+    bomb_xys = [xy for (xy, t) in bombs]
+    others = [xy for (n, s, b, xy) in game_state["others"]]  # noqa: F811
 
-    # Map each action to its corresponding position adjustment
-    move_offsets = {
-        'UP': (0, -1),
-        'DOWN': (0, 1),
-        'LEFT': (-1, 0),
-        'RIGHT': (1, 0)
-    }
-
-    if action in move_offsets:
-        dx, dy = move_offsets[action]
-        new_pos = (my_pos[0] + dx, my_pos[1] + dy)
-        # Check if the new position is blocked
-        if field[new_pos[0], new_pos[1]] != 0:
-            return False
-    return True
+    # Check which moves make sense at all
+    directions = [(x, y), (x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+    valid_tiles, valid_actions = [], []
+    for d in directions:
+        if (
+            (arena[d] == 0)
+            and (game_state["explosion_map"][d] < 1)
+            and (d not in others)
+            and (d not in bomb_xys)
+        ):
+            valid_tiles.append(d)
+    if (x - 1, y) in valid_tiles:
+        valid_actions.append("LEFT")
+    if (x + 1, y) in valid_tiles:
+        valid_actions.append("RIGHT")
+    if (x, y - 1) in valid_tiles:
+        valid_actions.append("UP")
+    if (x, y + 1) in valid_tiles:
+        valid_actions.append("DOWN")
+    if (x, y) in valid_tiles:
+        valid_actions.append("WAIT")
+    if (bombs_left > 0):
+        valid_actions.append("BOMB")
+    
+    return action in valid_actions
 
 def state_to_features(game_state: dict, reach: int = 15) -> np.array:
-    field = game_state["field"]
+    # Gather information about the game state
+    arena = game_state["field"]
+    my_pos = game_state["self"][-1]
     bombs = game_state["bombs"]
-    explosion_map = game_state["explosion_map"]
     coins = game_state["coins"]
-    agent = game_state["self"]
-    others = [o[3] for o in game_state["others"]]  # Extract other agents' positions
-
-    my_pos = np.array(agent[-1])
+    others = game_state["others"]  # Extract other agents' positions
 
     # Generate a matrix of positions around the player
     vision_range = np.arange(-reach, reach + 1)
@@ -104,33 +118,34 @@ def state_to_features(game_state: dict, reach: int = 15) -> np.array:
     vision_coords = np.stack([grid_x, grid_y], axis=-1) + my_pos
 
     # Clipping coordinates to ensure they are within field boundaries
-    vision_coords_clipped = np.clip(vision_coords, [0, 0], np.array(field.shape) - 1)
+    vision_coords_clipped = np.clip(vision_coords, [0, 0], np.array(arena.shape) - 1)
 
     # Define feature layers
-    feat_walls = (field[vision_coords_clipped[:, :, 0], vision_coords_clipped[:, :, 1]] == -1).astype(int)
-    feat_crates = (field[vision_coords_clipped[:, :, 0], vision_coords_clipped[:, :, 1]] == 1).astype(int)
-    feat_explosions = (explosion_map[vision_coords_clipped[:, :, 0], vision_coords_clipped[:, :, 1]] > 0).astype(int)
-    feat_coins = np.zeros_like(feat_walls)
-    feat_bombs = np.zeros_like(feat_walls)
-    feat_opponents = np.zeros_like(feat_walls)
-
-    # Mark coins, bombs, and opponents in the respective feature layers
+    # walls: -1, free: 0, crates: 1
+    f_arena = arena[vision_coords_clipped[:, :, 0], vision_coords_clipped[:, :, 1]]
+    bomb_map = np.zeros(arena.shape)
+    for (xb, yb), t in bombs:
+        bomb_map[xb, yb] = max(bomb_map[xb, yb], 4 - t)
+        # Expand explosion in four directions, stop if a wall is encountered
+        for direction in [(-1, 0), (1, 0), (0, -1), (0, 1)]:  # Directions: left, right, up, down
+            for h in range(1, 4):
+                xi, yj = xb + h * direction[0], yb + h * direction[1]
+                if not (0 <= xi < bomb_map.shape[0] and 0 <= yj < bomb_map.shape[1]) or arena[xi, yj] == -1:
+                    break
+                bomb_map[xi, yj] = max(bomb_map[xi, yj], 4 - t)
+    f_bombs = bomb_map[vision_coords_clipped[:, :, 0], vision_coords_clipped[:, :, 1]] / 2.0 - 1
+    f_coins = np.zeros_like(f_arena)
+    f_others = np.zeros_like(f_arena)
     for coin in coins:
         coin_pos = np.array(coin) - my_pos + reach
         if 0 <= coin_pos[0] < 2 * reach + 1 and 0 <= coin_pos[1] < 2 * reach + 1:
-            feat_coins[coin_pos[0], coin_pos[1]] = 1
+            f_coins[coin_pos[0], coin_pos[1]] = 1
 
-    for bomb in bombs:
-        bomb_pos = np.array(bomb[0]) - my_pos + reach
-        if 0 <= bomb_pos[0] < 2 * reach + 1 and 0 <= bomb_pos[1] < 2 * reach + 1:
-            feat_bombs[bomb_pos[0], bomb_pos[1]] = 1
-
-    for other in others:
-        other_pos = np.array(other) - my_pos + reach
+    for _, _, _, pos in others:
+        other_pos = np.array(pos) - my_pos + reach
         if 0 <= other_pos[0] < 2 * reach + 1 and 0 <= other_pos[1] < 2 * reach + 1:
-            feat_opponents[other_pos[0], other_pos[1]] = 1
+            f_others[other_pos[0], other_pos[1]] = 1
 
-    # Stack all layers into a single numpy array
-    features = np.stack([feat_walls, feat_crates, feat_explosions, feat_coins, feat_bombs, feat_opponents])
+    features = np.stack([f_arena, f_bombs, f_coins, f_others])
 
     return features 

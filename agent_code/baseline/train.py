@@ -14,7 +14,7 @@ import random
 import os
 import numpy as np
 from matplotlib import pyplot as plt
-import time
+from tqdm import tqdm
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
@@ -25,11 +25,37 @@ Transition = namedtuple('Transition',
 # Hyper parameters -- DO modify
 TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
-
+F_SAVE = 100
 BATCH_SIZE = 512
 GAMMA = 0.5
 TAU = 0.05
 LR = 1e-3
+
+DO_PLOTS = True
+losses = []
+rewards = []
+batch_indices = []
+
+def update_plots(losses, rewards):
+    plt.close('all')
+    plt.figure(figsize=(12, 5))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(losses, label='Loss')
+    plt.xlabel('Batch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss Over Time')
+    plt.legend()
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(rewards, label='Average Reward')
+    plt.xlabel('Round')
+    plt.ylabel('Reward')
+    plt.title('Average Reward Over Time')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig('./plots/result.png')
 
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
@@ -38,7 +64,7 @@ class BasicLayer(nn.Module):
     """
     Basic Convolutional Layer: Consists of Conv2d -> BatchNorm -> ReLU
     """
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=0, dilation=1, bias=False):
         super(BasicLayer, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=bias)
         self.bn = nn.BatchNorm2d(out_channels)
@@ -60,17 +86,9 @@ class DQN(nn.Module):
         self.num_actions = num_actions  # Number of actions
 
         # Defining convolutional layers
-        self.conv1 = BasicLayer(6, 16, kernel_size=3, padding=1)
-        self.conv2 = BasicLayer(16, 32, kernel_size=3, padding=1)
-        self.conv3 = BasicLayer(32, 64, kernel_size=3, padding=1)
-
-        # Skip connection: Process input directly to later layer
-        self.skip = nn.Sequential(
-            nn.Conv2d(6, 64, kernel_size=1),  # 1x1 convolution for channel alignment
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True)
-        )
-
+        self.conv1 = BasicLayer(4, 8)
+        self.conv2 = BasicLayer(8, 16)
+        self.conv3 = BasicLayer(16, 32)
         # Compute the output size after convolution layers
         self.conv_output_size = self._get_conv_out(input_shape)
 
@@ -85,17 +103,10 @@ class DQN(nn.Module):
         return int(np.prod(o.size()))
 
     def forward(self, x):
-        # Applying skip connection
-        skip_out = self.skip(x)
-
         # Passing through convolutional layers
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
-        
-        # Combining with skip connection
-        x = x + skip_out
-        
         x = x.view(x.size(0), -1)  # Flatten
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
@@ -123,13 +134,14 @@ def setup_training(self):
             self.policy_net = pickle.load(file).to(device)
 
     else:
-        self.policy_net = DQN((31, 31, 6), num_actions).to(device)
+        self.policy_net = DQN((31, 31, 4), num_actions).to(device)
 
-    self.target_net = DQN((31, 31, 6), num_actions).to(device)
+    self.target_net = DQN((31, 31, 4), num_actions).to(device)
     self.target_net.load_state_dict(self.policy_net.state_dict())
 
-    self.optimizer = optim.RMSprop(self.policy_net.parameters(), lr=1e-3, centered=True)
+    self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=LR, amsgrad=True)
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
+    self.num_round = 0
 
 
 # Action rotation mapping (for 0, 90, 180, 270 degrees)
@@ -232,6 +244,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     :param self: The same object that is passed to all of your callbacks.
     """
+    self.num_round += 1
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
     self.transitions.append(Transition(
         torch.Tensor(state_to_features(last_game_state)).type('torch.FloatTensor').to(device), 
@@ -272,8 +285,9 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.target_net.load_state_dict(target_net_state_dict)
 
     # Store the model
-    with open("my-saved-model.pt", "wb") as file:
-        pickle.dump(self.policy_net, file)
+    if self.num_round % F_SAVE == 0:
+        with open("my-saved-model.pt", "wb") as file:
+            pickle.dump(self.policy_net, file)
 
 
 def reward_from_events(self, events: List[str]) -> int:
@@ -284,14 +298,16 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 10,
-        e.INVALID_ACTION: -5, 
-        e.CRATE_DESTROYED: 8,
-        e.GOT_KILLED: -30,
-        e.KILLED_OPPONENT: 50,
-        e.KILLED_SELF: -40,
-        e.SURVIVED_ROUND: 10,
-        e.WAITED: -1,
+        e.WAITED: 0,
+        e.INVALID_ACTION: -1,
+        e.BOMB_DROPPED: 0.1,
+        e.CRATE_DESTROYED: 1.,
+        e.COIN_FOUND: 0.5,
+        e.COIN_COLLECTED: 2.,
+        e.KILLED_OPPONENT: 10.,
+        e.KILLED_SELF: -50.,
+        e.GOT_KILLED: -10.,
+        e.SURVIVED_ROUND: 5.
     }
     reward_sum = 0
     for event in events:

@@ -18,7 +18,7 @@ SCENARIOS = {
         "COIN_COUNT": 40
     },
     "loot-crate": { 
-        "CRATE_DENSITY": 0.75, 
+        "CRATE_DENSITY": 0.4, 
         "COIN_COUNT": 40 
     }, 
     # this is the tournament game mode
@@ -32,7 +32,7 @@ SCENARIOS = {
 MAX_AGENTS = 4
 
 # Round properties
-MAX_STEPS = 50
+MAX_STEPS = 200
 
 # GUI properties
 GRID_SIZE = 30

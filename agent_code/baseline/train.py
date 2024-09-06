@@ -23,36 +23,25 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 # Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 10000  # keep only ... last transitions
+TRANSITION_HISTORY_SIZE = 50000  # keep only ... last transitions
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
-F_SAVE = 100
-BATCH_SIZE = 512
+F_TRAIN = 100
+NUM_EPOCH = 10
+BATCH_SIZE = 256
 GAMMA = 0.5
 TAU = 0.05
 LR = 1e-3
 
 DO_PLOTS = True
-losses = []
-rewards = []
-batch_indices = []
 
-def update_plots(losses, rewards):
+def update_plots(scores):
     plt.close('all')
     plt.figure(figsize=(12, 5))
-    
-    plt.subplot(1, 2, 1)
-    plt.plot(losses, label='Loss')
-    plt.xlabel('Batch')
-    plt.ylabel('Loss')
-    plt.title('Training Loss Over Time')
-    plt.legend()
-    
-    plt.subplot(1, 2, 2)
-    plt.plot(rewards, label='Average Reward')
+
+    plt.plot(scores)
     plt.xlabel('Round')
-    plt.ylabel('Reward')
-    plt.title('Average Reward Over Time')
-    plt.legend()
+    plt.ylabel('Score')
+    plt.title('Scores Over Round')
     
     plt.tight_layout()
     plt.savefig('./plots/result.png')
@@ -64,7 +53,7 @@ class BasicLayer(nn.Module):
     """
     Basic Convolutional Layer: Consists of Conv2d -> BatchNorm -> ReLU
     """
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=0, dilation=1, bias=False):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, bias=True):
         super(BasicLayer, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=bias)
         self.bn = nn.BatchNorm2d(out_channels)
@@ -86,7 +75,7 @@ class DQN(nn.Module):
         self.num_actions = num_actions  # Number of actions
 
         # Defining convolutional layers
-        self.conv1 = BasicLayer(4, 8)
+        self.conv1 = BasicLayer(5, 8)
         self.conv2 = BasicLayer(8, 16)
         self.conv3 = BasicLayer(16, 32)
         # Compute the output size after convolution layers
@@ -134,27 +123,28 @@ def setup_training(self):
             self.policy_net = pickle.load(file).to(device)
 
     else:
-        self.policy_net = DQN((31, 31, 4), num_actions).to(device)
+        self.policy_net = DQN((17, 17, 5), num_actions).to(device)
 
-    self.target_net = DQN((31, 31, 4), num_actions).to(device)
+    self.target_net = DQN((17, 17, 5), num_actions).to(device)
     self.target_net.load_state_dict(self.policy_net.state_dict())
 
     self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=LR, amsgrad=True)
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
     self.num_round = 0
+    self.history_score = []
 
 
 # Action rotation mapping (for 0, 90, 180, 270 degrees)
 ROTATION_MAPPING = {
     0: {'UP': 'UP', 'RIGHT': 'RIGHT', 'DOWN': 'DOWN', 'LEFT': 'LEFT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
-    90: {'UP': 'RIGHT', 'RIGHT': 'DOWN', 'DOWN': 'LEFT', 'LEFT': 'UP', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
+    90: {'UP': 'LEFT', 'RIGHT': 'UP', 'DOWN': 'RIGHT', 'LEFT': 'DOWN', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
     180: {'UP': 'DOWN', 'RIGHT': 'LEFT', 'DOWN': 'UP', 'LEFT': 'RIGHT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
-    270: {'UP': 'LEFT', 'RIGHT': 'UP', 'DOWN': 'RIGHT', 'LEFT': 'DOWN', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
+    270: {'UP': 'RIGHT', 'RIGHT': 'DOWN', 'DOWN': 'LEFT', 'LEFT': 'UP', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
 }
 
 # Action flipping mapping (for horizontal and vertical flips)
-HORIZONTAL_FLIP_MAPPING = {'UP': 'DOWN', 'RIGHT': 'RIGHT', 'DOWN': 'UP', 'LEFT': 'LEFT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
-VERTICAL_FLIP_MAPPING = {'UP': 'UP', 'RIGHT': 'LEFT', 'DOWN': 'DOWN', 'LEFT': 'RIGHT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
+VERTICAL_FLIP_MAPPING = {'UP': 'DOWN', 'RIGHT': 'RIGHT', 'DOWN': 'UP', 'LEFT': 'LEFT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
+HORIZONTAL_FLIP_MAPPING = {'UP': 'UP', 'RIGHT': 'LEFT', 'DOWN': 'DOWN', 'LEFT': 'RIGHT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
 
 # Function to adjust action based on rotation and flip
 def adjust_action(action, rotation=0, flip_horizontal=False, flip_vertical=False):
@@ -252,40 +242,49 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         torch.zeros_like(torch.Tensor(state_to_features(last_game_state))).type('torch.FloatTensor').to(device), 
         torch.Tensor([reward_from_events(self, events)]).type('torch.FloatTensor').to(device)
         ))
+    # Store game score for analysis
+    self.history_score.append(last_game_state['self'][1])
+    # Only train the agent every N rounds
+    if self.num_round % F_TRAIN == 0:  # N is the number of rounds between training sessions
+        for epoch in tqdm(range(NUM_EPOCH)):  # Perform NUM_EPOCH training iterations
 
-    batch_size = min(BATCH_SIZE, len(self.transitions))
-    selected_transitions = random.sample(self.transitions, batch_size)
-    batch_data = Transition(*zip(*selected_transitions))
-    action_batch = torch.cat(batch_data.action)
-    reward_batch = torch.cat(batch_data.reward)
-    state_batch = torch.stack(batch_data.state)
-    next_state_batch = torch.stack(batch_data.next_state)
+            # Shuffle the entire transitions buffer
+            transition_list = list(self.transitions)
+            random.shuffle(transition_list)
 
-    state_values = self.policy_net(state_batch)
-    state_values = state_values.gather(1, action_batch)
-    with torch.no_grad():
-        next_state_values = self.target_net(next_state_batch)
-    next_state_values = next_state_values.max(1)[0]
-    expected_state_values = (next_state_values * GAMMA) + reward_batch
-    
-    criterion = nn.MSELoss()
-    loss = criterion(state_values, expected_state_values.unsqueeze(1))
+            # Split the transitions into batches and train on each batch
+            for i in range(0, len(transition_list), BATCH_SIZE):
+                batch_data = Transition(*zip(*transition_list[i:i + BATCH_SIZE]))
+                action_batch = torch.cat(batch_data.action)
+                reward_batch = torch.cat(batch_data.reward)
+                state_batch = torch.stack(batch_data.state)
+                next_state_batch = torch.stack(batch_data.next_state)
 
-    # Optimize the model
-    self.optimizer.zero_grad()
-    loss.backward()
-    # In-place gradient clipping
-    torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
-    self.optimizer.step()
+                state_values = self.policy_net(state_batch)
+                state_values = state_values.gather(1, action_batch)
+                with torch.no_grad():
+                    next_state_values = self.target_net(next_state_batch)
+                next_state_values = next_state_values.max(1)[0]
+                expected_state_values = (next_state_values * GAMMA) + reward_batch
 
-    target_net_state_dict = self.target_net.state_dict()
-    policy_net_state_dict = self.policy_net.state_dict()
-    for key in policy_net_state_dict:
-        target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-    self.target_net.load_state_dict(target_net_state_dict)
+                criterion = nn.MSELoss()
+                loss = criterion(state_values, expected_state_values.unsqueeze(1))
 
-    # Store the model
-    if self.num_round % F_SAVE == 0:
+                # Optimize the model
+                self.optimizer.zero_grad()
+                loss.backward()
+                # In-place gradient clipping
+                torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+                self.optimizer.step()
+
+        # Update the target network after NUM_EPOCH training iterations
+        target_net_state_dict = self.target_net.state_dict()
+        policy_net_state_dict = self.policy_net.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+        self.target_net.load_state_dict(target_net_state_dict)
+
+        update_plots(self.history_score)
         with open("my-saved-model.pt", "wb") as file:
             pickle.dump(self.policy_net, file)
 
@@ -300,11 +299,11 @@ def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
         e.WAITED: 0,
         e.INVALID_ACTION: -1,
-        e.BOMB_DROPPED: 0.1,
+        e.BOMB_DROPPED: 0.3,
         e.CRATE_DESTROYED: 1.,
         e.COIN_FOUND: 0.5,
         e.COIN_COLLECTED: 2.,
-        e.KILLED_OPPONENT: 10.,
+        e.KILLED_OPPONENT: 20.,
         e.KILLED_SELF: -50.,
         e.GOT_KILLED: -10.,
         e.SURVIVED_ROUND: 5.

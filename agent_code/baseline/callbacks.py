@@ -104,26 +104,25 @@ def check_inv_action(game_state: dict, action: str) -> bool:
     
     return action in valid_actions
 
-def state_to_features(game_state: dict, reach: int = 15) -> np.array:
+def state_to_features(game_state: dict, max_size=17) -> np.array:
     # Gather information about the game state
     arena = game_state["field"]
     my_pos = game_state["self"][-1]
     bombs = game_state["bombs"]
     coins = game_state["coins"]
     others = game_state["others"]  # Extract other agents' positions
-
-    # Generate a matrix of positions around the player
-    vision_range = np.arange(-reach, reach + 1)
-    grid_x, grid_y = np.meshgrid(vision_range, vision_range, indexing='ij')
-    vision_coords = np.stack([grid_x, grid_y], axis=-1) + my_pos
-
-    # Clipping coordinates to ensure they are within field boundaries
-    vision_coords_clipped = np.clip(vision_coords, [0, 0], np.array(arena.shape) - 1)
-
     # Define feature layers
     # walls: -1, free: 0, crates: 1
-    f_arena = arena[vision_coords_clipped[:, :, 0], vision_coords_clipped[:, :, 1]]
+    padding_size = max(0, max_size - arena.shape[0])
+    if padding_size:
+        f_arena = np.pad(arena,pad_width=((0, padding_size), (0, padding_size)),
+                            mode='constant', constant_values=-1)
+    else:
+        f_arena = arena
     bomb_map = np.zeros(arena.shape)
+    f_coins = np.zeros(arena.shape)
+    f_others = np.zeros(arena.shape)
+    f_agent = np.zeros(arena.shape)
     for (xb, yb), t in bombs:
         bomb_map[xb, yb] = max(bomb_map[xb, yb], 4 - t)
         # Expand explosion in four directions, stop if a wall is encountered
@@ -133,19 +132,12 @@ def state_to_features(game_state: dict, reach: int = 15) -> np.array:
                 if not (0 <= xi < bomb_map.shape[0] and 0 <= yj < bomb_map.shape[1]) or arena[xi, yj] == -1:
                     break
                 bomb_map[xi, yj] = max(bomb_map[xi, yj], 4 - t)
-    f_bombs = bomb_map[vision_coords_clipped[:, :, 0], vision_coords_clipped[:, :, 1]] / 2.0 - 1
-    f_coins = np.zeros_like(f_arena)
-    f_others = np.zeros_like(f_arena)
+    f_bombs = bomb_map / 2.0 - 1
     for coin in coins:
-        coin_pos = np.array(coin) - my_pos + reach
-        if 0 <= coin_pos[0] < 2 * reach + 1 and 0 <= coin_pos[1] < 2 * reach + 1:
-            f_coins[coin_pos[0], coin_pos[1]] = 1
-
+        f_coins[coin[0], coin[1]] = 1
     for _, _, _, pos in others:
-        other_pos = np.array(pos) - my_pos + reach
-        if 0 <= other_pos[0] < 2 * reach + 1 and 0 <= other_pos[1] < 2 * reach + 1:
-            f_others[other_pos[0], other_pos[1]] = 1
-
-    features = np.stack([f_arena, f_bombs, f_coins, f_others])
+        f_others[pos[0], pos[1]] = 1
+    f_agent[my_pos[0], my_pos[1]] = 1
+    features = np.stack([f_arena, f_bombs, f_coins, f_others, f_agent])
 
     return features 

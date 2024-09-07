@@ -19,7 +19,10 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
-
+MOVE_TO_TARGET = "MOVE_TO_TARGET"
+MOVE_TO_DANGER = "MOVE_TO_DANGER"
+TRY_TO_ESCAPE = "TRY_TO_ESCAPE"
+ATTACK_SOMETHING = "ATTACK_SOMETHING"
 
 def setup_training(self):
     """
@@ -121,14 +124,20 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
-    # Idea: Add your own events to hand out rewards
-    if ...:
-        events.append(PLACEHOLDER_EVENT)
-
-    reward = reward_from_events(self, events)
-
     old_feature = state_to_features(old_game_state)
     new_feature = state_to_features(new_game_state)
+    # Idea: Add your own events to hand out rewards
+    if old_feature[ACTIONS.index(self_action)] == "target":
+        events.append(MOVE_TO_TARGET)
+    if old_feature[ACTIONS.index(self_action)] == "danger":
+        events.append(MOVE_TO_DANGER)
+    if old_feature[ACTIONS.index(self_action)] == "escape":
+        events.append(TRY_TO_ESCAPE)
+    if self_action == 'BOMB':
+        if 'crate' in old_feature[:4] or 'enemy' in old_feature[:4]:
+            events.append(ATTACK_SOMETHING)
+
+    reward = reward_from_events(self, events)
 
     # Define all transformation combinations (rotation, horizontal flip, vertical flip)
     rotation_angles = [0, 90, 180, 270]
@@ -144,6 +153,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             # Adjust the action based on rotation and flip
             adjusted_action = adjust_action(self_action, rotation, flip_horizontal, flip_vertical)
             update_table(self, adjusted_old_feature, adjusted_action, adjusted_new_feature, reward)
+    
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
@@ -187,18 +197,21 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.MOVED_LEFT: -.1,
-        e.MOVED_RIGHT: -.1,
-        e.MOVED_UP: -.1,
-        e.MOVED_DOWN: -.1,
-        e.WAITED: -.1,
-        e.INVALID_ACTION: -10,
-        e.CRATE_DESTROYED: 1.,
-        e.COIN_FOUND: 0.5,
-        e.COIN_COLLECTED: 2.,
-        e.KILLED_OPPONENT: 20.,
-        e.KILLED_SELF: -50.,
-        e.GOT_KILLED: -10.,
+        e.MOVED_LEFT: -1,
+        e.MOVED_RIGHT: -1,
+        e.MOVED_UP: -1,
+        e.MOVED_DOWN: -1,
+        e.WAITED: -1,
+        e.INVALID_ACTION: -50,
+        e.CRATE_DESTROYED: 20,
+        e.COIN_COLLECTED: 50,
+        e.KILLED_OPPONENT: 100.,
+        e.KILLED_SELF: -300.,
+        e.GOT_KILLED: -100.,
+        MOVE_TO_TARGET: 10,
+        MOVE_TO_DANGER: -60,
+        TRY_TO_ESCAPE: 20,
+        ATTACK_SOMETHING: 50,
     }
     reward_sum = 0
     for event in events:

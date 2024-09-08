@@ -1,5 +1,5 @@
-
 from typing import List
+import numpy as np
 
 import events as e
 from .features import state_to_features
@@ -23,18 +23,42 @@ def setup_training(self):
     self.epsilon_decay = 0.999
     self.gamma = 0.9
     self.alpha = 0.1
+    self.lambda_ = 0.9  # The lambda parameter for Sarsa(λ)
     self.q_table = Table()
+    # TODO: better data structure for faster update
+    self.eligibility_traces = Table()  # Initialize the eligibility traces table
+    
     try:
         self.q_table.load_from_json('q_table.json')
         self.logger.debug('Load table from file. Continue training.')
     except FileNotFoundError:
         self.logger.debug('Start training from an empty table.')
 
+    for state in self.q_table:
+        self.eligibility_traces[state] = [0.0] * len(ACTIONS)
+
+
+def update_eligibility_traces(self, s0: str, a0: int):
+    """
+    Update the eligibility traces for the current state-action pair.
+
+    :param s0: The current state in string format.
+    :param a0: The index of the chosen action.
+    """
+    # Set eligibility trace for current state-action pair to 1
+    self.eligibility_traces[s0][a0] = 1.0
+    
+    # Decay all other eligibility traces
+    for state in self.eligibility_traces:
+        E = np.array(self.eligibility_traces[state]) * self.gamma * self.lambda_
+        self.eligibility_traces[state] = E.tolist()
+
 
 def learn(self, old_feature: List[str], self_action: str, new_feature: List[str], reward: float):
     s0 = feat2str(old_feature)
     a0 = ACTIONS.index(self_action)
     Q_s0a0 = self.q_table[s0][a0]
+    
     if len(new_feature):
         # update q_table based on next action
         new_action = choose_action(self, new_feature)
@@ -42,9 +66,17 @@ def learn(self, old_feature: List[str], self_action: str, new_feature: List[str]
         a1 = ACTIONS.index(new_action)
         Q_s1a1 = self.q_table[s1][a1]
         delta = reward + self.gamma * Q_s1a1 - Q_s0a0
-    else: # End of the round
+    else:  # End of the round
         delta = reward - Q_s0a0
-    self.q_table[s0][a0] = Q_s0a0 + self.alpha * delta
+
+    # Update eligibility traces
+    update_eligibility_traces(self, s0, a0)
+
+    # Update all Q values with eligibility traces
+    for state in self.q_table:
+        E = np.array(self.eligibility_traces[state])
+        Q = np.array(self.q_table[state]) + self.alpha * delta * E
+        self.q_table[state] = Q.tolist()
 
 
 def learn_symmetrically(self, old_feature: List[str], self_action: str, new_feature: List[str], reward: float):
@@ -81,13 +113,11 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     old_feature = state_to_features(old_game_state)
     new_feature = state_to_features(new_game_state)
-    # Idea: Add your own events to hand out rewards
     if ...:
         events.append(PLACEHOLDER_EVENT)
     reward = reward_from_events(self, events)
 
     learn_symmetrically(self, old_feature, self_action, new_feature, reward)
-    
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
@@ -110,6 +140,9 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     reward = reward_from_events(self, events)
 
     learn_symmetrically(self, old_feature, last_action, new_feature, reward)
+
+    for state in self.q_table:
+        self.eligibility_traces[state] = [0.0] * len(ACTIONS)
 
     if self.epsilon >= self.epsilon_min:
         self.epsilon *= self.epsilon_decay

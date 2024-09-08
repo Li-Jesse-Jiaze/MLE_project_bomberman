@@ -32,11 +32,11 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.epsilon = 0.3
-    self.epsilon_min = 0.05
+    self.epsilon = 0.8
+    self.epsilon_min = 0.01
     self.epsilon_decay = 0.9995
     self.gamma = 0.65
-    self.alpha = 0.25
+    self.alpha = 0.05
     if os.path.isfile("q_tabular.json"):
         with open("q_tabular.json", "r") as file:
             self.q_tabular = json.load(file)
@@ -201,17 +201,17 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_RIGHT: -1,
         e.MOVED_UP: -1,
         e.MOVED_DOWN: -1,
-        e.WAITED: -1,
+        e.WAITED: -5,
+        e.BOMB_DROPPED: -10,
         e.INVALID_ACTION: -50,
-        e.CRATE_DESTROYED: 20,
-        e.COIN_COLLECTED: 50,
+        e.COIN_COLLECTED: 100,
         e.KILLED_OPPONENT: 100.,
         e.KILLED_SELF: -300.,
         e.GOT_KILLED: -100.,
-        MOVE_TO_TARGET: 10,
+        MOVE_TO_TARGET: 50,
         MOVE_TO_DANGER: -60,
-        TRY_TO_ESCAPE: 20,
-        ATTACK_SOMETHING: 50,
+        TRY_TO_ESCAPE: 60,
+        ATTACK_SOMETHING: 80,
     }
     reward_sum = 0
     for event in events:

@@ -112,3 +112,4 @@ screenshots/*.webm
 replays/
 results/
 agent_code/*/plots/*
+try.ipynb

@@ -2,6 +2,7 @@ import os
 import json
 import random
 from collections import deque
+import settings as s
 
 import numpy as np
 
@@ -76,7 +77,7 @@ def act(self, game_state: dict) -> str:
 def calculate_steps(field, pos, objects):
     distances = np.full((len(objects),), np.inf)
     target_index_map = {tuple(obj): idx for idx, obj in enumerate(objects)}
-    directions = [(0, 1), (0, -1), (-1, 0), (1, 0)]
+    directions = [(0, -1), (1, 0), (0, 1), (-1, 0)] 
 
     q = deque()
     q.append((pos[0], pos[1], 0))
@@ -103,48 +104,8 @@ def calculate_steps(field, pos, objects):
     return distances
 
 
-def look_for_target(game_state, features):
-    field, _, _, coins, others, (x, y) = (
-        game_state['field'], game_state['explosion_map'], game_state['bombs'],
-        game_state['coins'], game_state['others'], game_state['self'][-1]
-    )
-    candidates = np.array(features)[:4]
-    candidates = np.where(candidates == 'free')[0]
-    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
-    weights = {"crates":1, "coins":30, "enemy":1}
-
-    if not len(candidates):
-        return
-
-    # Calculate scores, as described above:
-    scores, best_indices = np.zeros(len(candidates)), []
-    for i, index in enumerate(candidates):
-        temp_pos = np.array(directions[index])
-        # curr_tile = np.array([self_coordinates[0] + col, self_coordinates[1] + row])
-        for object_name in weights.keys():
-            if object_name == "crates":
-                objects = np.array(np.where(field == 1))
-                objects = objects.transpose()
-
-            elif object_name == "coins":
-                objects = np.array(coins)
-            else:
-                objects = np.array([op[-1] for op in others])
-
-            if len(objects):
-                distance = calculate_steps(field, temp_pos, objects)
-                if len(distance):
-                    temp = np.ones(len(distance)) * weights[object_name]
-                    scores[i] += np.sum(temp / (distance + 1))
-
-
-    best_indices = candidates[np.where(np.array(scores) == max(scores))[0]]
-
-    j = np.random.choice(best_indices)
-    features[j] = "target"
-
-
 def find_safe_positions(pos, threshold, danger, field, explosion_map):
+    #TODO: calculate safety dont goto dead end
     x, y = pos
     max_rows = len(danger)
     max_cols = len(danger[0])
@@ -158,33 +119,85 @@ def find_safe_positions(pos, threshold, danger, field, explosion_map):
     return np.array(safe_positions)
 
 
+def find_crates_neighbors(field):
+    center = field[1:-1, 1:-1]
+    up = field[:-2, 1:-1]
+    down = field[2:, 1:-1]
+    left = field[1:-1, :-2]
+    right = field[1:-1, 2:]
+    result = (center == 0) & ((up == 1) | (down == 1) | (left == 1) | (right == 1))
+    positions = np.argwhere(result)
+    return positions + 1  # back to ori index
+
+
+def look_for_target(game_state, features):
+    field, _, _, coins, others, (x, y) = (
+        game_state['field'], game_state['explosion_map'], game_state['bombs'],
+        game_state['coins'], game_state['others'], game_state['self'][-1]
+    )
+    candidates = np.where(np.array(features)[:4] == 'free')[0]
+    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
+    weights = {"crates": 1, "coins": 50, "enemy": 1}
+
+    if not candidates.size:
+        return
+
+    # Precompute positions for crates, coins, and enemies
+    object_positions = {
+        "crates": find_crates_neighbors(field),
+        "coins": np.array(coins),
+        "enemy": np.array([op[-1] for op in others])
+    }
+
+    scores = np.zeros(len(candidates))
+    # Precompute distances from current positions to all types of objects
+    for object_name, positions in object_positions.items():
+        if positions.size:
+            for i, index in enumerate(candidates):
+                direction = np.array(directions[index])
+                distances = calculate_steps(field, direction, positions)
+                if distances.size:
+                    scores[i] += np.sum(weights[object_name] / (distances + 1))
+
+    # Determine the best candidates with the maximum score
+    best_indices = candidates[scores == scores.max()]
+
+    if best_indices.size:
+        chosen_index = np.random.choice(best_indices)
+        features[chosen_index] = "target"
+
+
 def look_for_escape(game_state, features, danger):
     field, explosion_map, _, _, _, (x, y) = (
         game_state['field'], game_state['explosion_map'], game_state['bombs'],
         game_state['coins'], game_state['others'], game_state['self'][-1]
     )
-    candidates = np.array(features)[:4]
-    candidates = np.where(candidates == 'danger')[0]
-    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
+    candidates = np.where(np.array(features)[:4] == 'danger')[0]
+    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
 
-    if not len(candidates):
+    if not candidates.size:
         return
 
-    # Calculate the less step to free
-    min_distance, best_indices = np.zeros(len(candidates)) * 5, []
+    # Initialize an array for storing minimum distances to safety
+    min_distances = np.full(len(candidates), np.inf)
+
+    # Precompute potential safe positions from all possible danger locations
+    all_safe_positions = [find_safe_positions(np.array(direction), s.BOMB_TIMER, danger, field, explosion_map) 
+                          for direction in directions]
+
     for i, index in enumerate(candidates):
-        temp_pos = np.array(directions[index])
-        objects = find_safe_positions(temp_pos, 4, danger, field, explosion_map)
-        if len(objects):
-            distance = calculate_steps(field, temp_pos, objects)
-            if len(distance):
-                min_distance[i] = distance.min()
+        safe_positions = all_safe_positions[index]
+        if safe_positions.size:
+            distances = calculate_steps(field, np.array(directions[index]), np.array(safe_positions))
+            if distances.size:
+                min_distances[i] = distances.min()
 
+    # Find the candidates with the minimal distance to a safe position
+    best_indices = candidates[min_distances == min_distances.min()]
 
-    best_indices = candidates[np.where(np.array(min_distance) == min(min_distance))[0]]
-
-    j = np.random.choice(best_indices)
-    features[j] = "escape"
+    if best_indices.size:
+        chosen_index = np.random.choice(best_indices)
+        features[chosen_index] = "target"
 
 
 def danger_map(field: np.array, bombs: list) -> np.array:
@@ -197,8 +210,8 @@ def danger_map(field: np.array, bombs: list) -> np.array:
 
 
 def update_danger(danger, field, x_bomb, y_bomb, timer):
-    max_timer_value = 4
-    directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # left, right, up, down
+    max_timer_value = s.BOMB_TIMER
+    directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]  # left, right, up, down
     
     # Set danger level at bomb's location
     danger[x_bomb, y_bomb] = max(danger[x_bomb, y_bomb], max_timer_value - timer)
@@ -244,21 +257,22 @@ def state_to_features(game_state: dict):
     for i, j in directions:
         tile = field_labels[field[i, j]]
         if tile == 'free':
-            if any((b[0] == i and b[1] == j) for b, _ in bombs):
-                tile = 'bomb'
-            elif any((coin[0] == i and coin[1] == j) for coin in coins):
-                tile = 'coin'
+            if explosion_map[i, j] > 0:
+                tile = 'wall'
             elif any(op[-1] == (i, j) for op in others):
                 tile = 'enemy'
-            elif explosion_map[i, j] > 0:
-                tile = 'explosion'
+            elif any((b[0] == i and b[1] == j) for b, _ in bombs):
+                tile = 'bomb'
             elif danger[i, j] > 0:
                 tile = 'danger'
+            elif any((coin[0] == i and coin[1] == j) for coin in coins):
+                tile = 'coin'
         features.append(tile)
-    if 'free' in features:
-        look_for_target(game_state, features)
-    elif 'danger' in features:
-        look_for_escape(game_state, features, danger)
+    if 'coin' not in features[:4]:
+        if 'free' in features[:4]:
+            look_for_target(game_state, features)
+        elif 'danger' == features[4] or 'bomb' in features:
+            look_for_escape(game_state, features, danger)
     features.append(str(game_state['self'][2]))  # Append bomb_left
 
     return features

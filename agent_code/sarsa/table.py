@@ -3,7 +3,7 @@ import json
 
 class Table(dict):
     def __missing__(self, key):
-        self[key] = [0] * 6
+        self[key] = [0.0] * 6
         return self[key]
 
     def save_to_json(self, file_path='q_table.json'):

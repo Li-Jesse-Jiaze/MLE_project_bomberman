@@ -2,7 +2,8 @@
 from typing import List
 
 import events as e
-from .callbacks import state_to_features, feat2str, choose_action, ACTIONS
+from .features import state_to_features
+from .callbacks import feat2str, choose_action, ACTIONS
 from .table import Table
 from .symmetry import adjust_action, adjust_state
 
@@ -17,7 +18,7 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.epsilon = 0.1
+    self.epsilon = 0.5
     self.epsilon_min = 0.01
     self.epsilon_decay = 0.999
     self.gamma = 0.9

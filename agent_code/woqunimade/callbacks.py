@@ -74,10 +74,14 @@ def act(self, game_state: dict) -> str:
             return np.random.choice(ACTIONS, p=[0.2, 0.2, 0.2, 0.2, 0.1, 0.1])
 
 
-def calculate_steps(field, pos, objects):
+def calculate_steps(game_state, pos, objects, danger):
+    field, explosion_map, bombs, _, others, (x, y) = (
+        game_state['field'], game_state['explosion_map'], game_state['bombs'],
+        game_state['coins'], game_state['others'], game_state['self'][-1]
+    )
     distances = np.full((len(objects),), np.inf)
     target_index_map = {tuple(obj): idx for idx, obj in enumerate(objects)}
-    directions = [(0, -1), (1, 0), (0, 1), (-1, 0)] 
+    directions = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)] 
 
     q = deque()
     q.append((pos[0], pos[1], 0))
@@ -88,6 +92,9 @@ def calculate_steps(field, pos, objects):
     # BFS
     while q:
         x, y, steps = q.popleft()
+        if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] <= steps < s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
+            or explosion_map[x][y] > steps: # explosion while agent passing by
+            continue
         if (x, y) in target_index_map:
             idx = target_index_map[(x, y)]
             distances[idx] = steps
@@ -96,10 +103,16 @@ def calculate_steps(field, pos, objects):
                 break
         for dx, dy in directions:
             nx, ny = x + dx, y + dy
-            if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
-                if field[nx, ny] == 0 and (nx, ny) not in visited:
-                    visited.add((nx, ny))
-                    q.append((nx, ny, steps + 1))
+            if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and (nx, ny) not in visited:
+                if field[nx, ny] != 0:
+                    continue
+                if any((nx, ny) == other[-1] for other in others) and steps == 0:
+                    continue
+                bomb_threat = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
+                if bomb_threat:
+                    continue
+                visited.add((nx, ny))
+                q.append((nx, ny, steps + 1))
     
     return distances
 
@@ -130,7 +143,7 @@ def find_crates_neighbors(field):
     return positions + 1  # back to ori index
 
 
-def look_for_target(game_state, features):
+def look_for_target(game_state, features, danger):
     field, _, _, coins, others, (x, y) = (
         game_state['field'], game_state['explosion_map'], game_state['bombs'],
         game_state['coins'], game_state['others'], game_state['self'][-1]
@@ -155,7 +168,7 @@ def look_for_target(game_state, features):
         if positions.size:
             for i, index in enumerate(candidates):
                 direction = np.array(directions[index])
-                distances = calculate_steps(field, direction, positions)
+                distances = calculate_steps(game_state, direction, positions, danger)
                 if distances.size:
                     scores[i] += np.sum(weights[object_name] / (distances + 1))
 
@@ -188,7 +201,7 @@ def look_for_escape(game_state, features, danger):
     for i, index in enumerate(candidates):
         safe_positions = all_safe_positions[index]
         if safe_positions.size:
-            distances = calculate_steps(field, np.array(directions[index]), np.array(safe_positions))
+            distances = calculate_steps(game_state, np.array(directions[index]), np.array(safe_positions), danger)
             if distances.size:
                 min_distances[i] = distances.min()
 
@@ -270,7 +283,7 @@ def state_to_features(game_state: dict):
         features.append(tile)
     if 'coin' not in features[:4]:
         if 'free' in features[:4]:
-            look_for_target(game_state, features)
+            look_for_target(game_state, features, danger)
         elif 'danger' == features[4] or 'bomb' in features:
             look_for_escape(game_state, features, danger)
     features.append(str(game_state['self'][2]))  # Append bomb_left

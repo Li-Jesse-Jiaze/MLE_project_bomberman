@@ -213,7 +213,7 @@ def look_for_target(game_state, features, safe_positions, danger):
 #         features[chosen_index] = "target"
 
 
-def find_safe_positions(game_state, escape_time, danger):
+def find_safe_positions(game_state, danger, max_steps=5):
     field, explosion_map, bombs, _, others, pos = (
         game_state['field'], game_state['explosion_map'], game_state['bombs'],
         game_state['coins'], game_state['others'], game_state['self'][-1]
@@ -222,19 +222,18 @@ def find_safe_positions(game_state, escape_time, danger):
     first_step_to_safes = []
     q = deque()
     q.append((pos[0], pos[1], 0, None))
-    visited = set((pos[0], pos[1]))
     while q:
         x, y, steps, first_step = q.popleft()
         if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] <= steps < s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
             or explosion_map[x][y] > steps: # explosion while agent passing by
             continue
-        if steps == escape_time:
+        if steps == max_steps:
             if first_step not in first_step_to_safes:
                 first_step_to_safes.append(first_step)
                 continue
         for i, (dx, dy) in enumerate(directions):
             nx, ny = x + dx, y + dy
-            if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and (nx, ny) not in visited:
+            if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
                 if field[nx, ny] != 0:
                     continue
                 if any((nx, ny) == other[-1] for other in others) and steps == 0:
@@ -242,9 +241,8 @@ def find_safe_positions(game_state, escape_time, danger):
                 bomb_prevent = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
                 if bomb_prevent:
                     continue
-                visited.add((nx, ny))
                 new_first_step = i if first_step is None else first_step
-                if steps < escape_time:
+                if steps < max_steps:
                     q.append((nx, ny, steps + 1, new_first_step))
     return first_step_to_safes
 
@@ -317,7 +315,7 @@ def state_to_features(game_state: dict):
                 tile = 'coin'
         features.append(tile)
     if 'coin' not in features[:4]:
-        safe_positions = find_safe_positions(game_state, s.BOMB_TIMER - danger[x, y], danger)
+        safe_positions = find_safe_positions(game_state, danger)
         look_for_target(game_state, features, safe_positions, danger)
     features.append(str(game_state['self'][2]))  # Append bomb_left
 

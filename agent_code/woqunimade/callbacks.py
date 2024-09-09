@@ -108,8 +108,8 @@ def calculate_steps(game_state, pos, objects, danger):
                     continue
                 if any((nx, ny) == other[-1] for other in others) and steps == 0:
                     continue
-                bomb_threat = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
-                if bomb_threat:
+                bomb_prevent = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
+                if bomb_prevent:
                     continue
                 visited.add((nx, ny))
                 q.append((nx, ny, steps + 1))
@@ -143,12 +143,12 @@ def find_crates_neighbors(field):
     return positions + 1  # back to ori index
 
 
-def look_for_target(game_state, features, danger):
+def look_for_target(game_state, features, safe_positions, danger):
     field, _, _, coins, others, (x, y) = (
         game_state['field'], game_state['explosion_map'], game_state['bombs'],
         game_state['coins'], game_state['others'], game_state['self'][-1]
     )
-    candidates = np.where(np.array(features)[:4] == 'free')[0]
+    candidates = np.array(safe_positions)
     directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
     weights = {"crates": 1, "coins": 50, "enemy": 1}
 
@@ -180,37 +180,73 @@ def look_for_target(game_state, features, danger):
         features[chosen_index] = "target"
 
 
-def look_for_escape(game_state, features, danger):
-    field, explosion_map, _, _, _, (x, y) = (
+# def look_for_escape(game_state, features, danger):
+#     field, explosion_map, _, _, _, (x, y) = (
+#         game_state['field'], game_state['explosion_map'], game_state['bombs'],
+#         game_state['coins'], game_state['others'], game_state['self'][-1]
+#     )
+#     candidates = np.where(np.array(features)[:4] == 'danger')[0]
+#     directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
+
+#     if not candidates.size:
+#         return
+
+#     # Initialize an array for storing minimum distances to safety
+#     min_distances = np.full(len(candidates), np.inf)
+
+#     # Precompute potential safe positions from all possible danger locations
+#     all_safe_positions = [find_safe_positions(np.array(direction), s.BOMB_TIMER, danger, field, explosion_map) 
+#                           for direction in directions]
+
+#     for i, index in enumerate(candidates):
+#         safe_positions = all_safe_positions[index]
+#         if safe_positions.size:
+#             distances = calculate_steps(game_state, np.array(directions[index]), np.array(safe_positions), danger)
+#             if distances.size:
+#                 min_distances[i] = distances.min()
+
+#     # Find the candidates with the minimal distance to a safe position
+#     best_indices = candidates[min_distances == min_distances.min()]
+
+#     if best_indices.size:
+#         chosen_index = np.random.choice(best_indices)
+#         features[chosen_index] = "target"
+
+
+def find_safe_positions(game_state, escape_time, danger):
+    field, explosion_map, bombs, _, others, pos = (
         game_state['field'], game_state['explosion_map'], game_state['bombs'],
         game_state['coins'], game_state['others'], game_state['self'][-1]
     )
-    candidates = np.where(np.array(features)[:4] == 'danger')[0]
-    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)]
-
-    if not candidates.size:
-        return
-
-    # Initialize an array for storing minimum distances to safety
-    min_distances = np.full(len(candidates), np.inf)
-
-    # Precompute potential safe positions from all possible danger locations
-    all_safe_positions = [find_safe_positions(np.array(direction), s.BOMB_TIMER, danger, field, explosion_map) 
-                          for direction in directions]
-
-    for i, index in enumerate(candidates):
-        safe_positions = all_safe_positions[index]
-        if safe_positions.size:
-            distances = calculate_steps(game_state, np.array(directions[index]), np.array(safe_positions), danger)
-            if distances.size:
-                min_distances[i] = distances.min()
-
-    # Find the candidates with the minimal distance to a safe position
-    best_indices = candidates[min_distances == min_distances.min()]
-
-    if best_indices.size:
-        chosen_index = np.random.choice(best_indices)
-        features[chosen_index] = "target"
+    directions = [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]
+    first_step_to_safes = []
+    q = deque()
+    q.append((pos[0], pos[1], 0, None))
+    visited = set((pos[0], pos[1]))
+    while q:
+        x, y, steps, first_step = q.popleft()
+        if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] <= steps < s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
+            or explosion_map[x][y] > steps: # explosion while agent passing by
+            continue
+        if steps == escape_time:
+            if first_step not in first_step_to_safes:
+                first_step_to_safes.append(first_step)
+                continue
+        for i, (dx, dy) in enumerate(directions):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and (nx, ny) not in visited:
+                if field[nx, ny] != 0:
+                    continue
+                if any((nx, ny) == other[-1] for other in others) and steps == 0:
+                    continue
+                bomb_prevent = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
+                if bomb_prevent:
+                    continue
+                visited.add((nx, ny))
+                new_first_step = i if first_step is None else first_step
+                if steps < escape_time:
+                    q.append((nx, ny, steps + 1, new_first_step))
+    return first_step_to_safes
 
 
 def danger_map(field: np.array, bombs: list) -> np.array:
@@ -224,7 +260,7 @@ def danger_map(field: np.array, bombs: list) -> np.array:
 
 def update_danger(danger, field, x_bomb, y_bomb, timer):
     max_timer_value = s.BOMB_TIMER
-    directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]  # left, right, up, down
+    directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]
     
     # Set danger level at bomb's location
     danger[x_bomb, y_bomb] = max(danger[x_bomb, y_bomb], max_timer_value - timer)
@@ -262,8 +298,7 @@ def state_to_features(game_state: dict):
     )
 
     features = []
-    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]  # UP, RIGHT, DOWN, LEFT, CENTER
-
+    directions = [(x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y), (x, y)]
     danger = danger_map(field, bombs)
     field_labels = {1: 'crate', -1: 'wall', 0: 'free'}
     
@@ -282,10 +317,8 @@ def state_to_features(game_state: dict):
                 tile = 'coin'
         features.append(tile)
     if 'coin' not in features[:4]:
-        if 'free' in features[:4]:
-            look_for_target(game_state, features, danger)
-        elif 'danger' == features[4] or 'bomb' in features:
-            look_for_escape(game_state, features, danger)
+        safe_positions = find_safe_positions(game_state, s.BOMB_TIMER - danger[x, y], danger)
+        look_for_target(game_state, features, safe_positions, danger)
     features.append(str(game_state['self'][2]))  # Append bomb_left
 
     return features

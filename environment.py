@@ -500,6 +500,9 @@ class BombeRLeWorld(GenericWorld):
             name = f'replays/{self.round_id}.pt' if self.args.save_replay is True else self.args.save_replay
             with open(name, 'wb') as f:
                 pickle.dump(self.replay, f)
+        
+        self.logger.info(f'scores: {[(a.name, a.score) for a in self.agents]}')
+
 
     def end(self):
         super().end()

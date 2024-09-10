@@ -143,11 +143,6 @@ def predict_next_state(game_state, bomb_drop=False):
         for y in range(len(explosion_map[0])):
             if explosion_map[x][y] > 0:
                 explosion_map[x][y] -= 1
-    
-    for x in range(len(field)):
-        for y in range(len(field[0])):
-            if field[x][y] == 1 and explosion_map[x][y] > 0:
-                field[x][y] = 0
 
     return next_state
 
@@ -167,7 +162,6 @@ def trigger_explosion(position, game_state):
             game_state['explosion_map'][nx][ny] = s.EXPLOSION_TIMER
             if game_state['field'][nx][ny] == 1:
                 game_state['field'][nx][ny] = 0
-                break
             
             game_state['others'] = [other for other in game_state['others'] if other[-1] != (nx, ny)]
 

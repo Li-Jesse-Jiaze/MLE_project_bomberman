@@ -127,16 +127,37 @@ def is_safe_to_drop_bomb(game_state):
 
     return safe, crate
 
+def calculate_bomb_impact_matrix(field):
+    height, width = field.shape
+    bomb_impact_matrix = np.zeros((height * width, height * width), dtype=int)
+
+    for x in range(height):
+        for y in range(width):
+            if field[x, y] == -1:
+                continue
+            index = x * width + y
+            # Explore the bomb range considering BOMB_POWER
+            for d in DIRECTIONS:
+                for steps in range(1, s.BOMB_POWER + 1):
+                    nx, ny = x + d[0] * steps, y + d[1] * steps
+                    if 0 <= nx < height and 0 <= ny < width:
+                        if field[nx, ny] == -1:
+                            break
+                        bomb_impact_matrix[index, nx * width + ny] = 1
+    return bomb_impact_matrix
+
 
 def find_crates_neighbors(field):
-    center = field[1:-1, 1:-1]
-    up = field[:-2, 1:-1]
-    down = field[2:, 1:-1]
-    left = field[1:-1, :-2]
-    right = field[1:-1, 2:]
-    result = (center == 0) & ((up == 1) | (down == 1) | (left == 1) | (right == 1))
-    positions = np.argwhere(result)
-    return positions + 1  # back to ori index
+    bomb_impact_matrix = calculate_bomb_impact_matrix(field)
+    height, width = field.shape
+    crate_vector = (field == 1).astype(int).flatten()
+    crate_counts = bomb_impact_matrix.dot(crate_vector)
+    crate_counts_matrix = crate_counts.reshape(height, width)
+    result_matrix = np.where(field == 0, crate_counts_matrix, 0)
+
+    positions = np.argwhere(result_matrix)
+    crates_amount = np.array([int(result_matrix[tuple(idx)]) for idx in positions])
+    return positions, crates_amount
 
 
 def look_for_target(game_state, features, safe_positions):
@@ -161,16 +182,29 @@ def look_for_target(game_state, features, safe_positions):
     }
 
     scores = np.zeros(len(candidates))
-    # Precompute distances from current positions to all types of objects
-    for object_name, positions in object_positions.items():
+    # Precompute distances from current positions to coins and enemy
+    for object_name in ['coins', 'enemy']:
+        positions = object_positions[object_name]
         if positions.size:
             for i, index in enumerate(candidates):
                 direction = np.array(directions[index])
                 distances = calculate_steps(next_state, direction, positions, danger)
                 if distances.size:
                     scores[i] += np.sum(weights[object_name] / (distances + 1))
-                    if danger[x][y] > 0:
-                        scores[i] += len(safe_positions[index]) * 20
+
+    # crates
+    object_name = 'crates'
+    positions, amount = object_positions[object_name]
+    if positions.size:
+        for i, index in enumerate(candidates):
+            direction = np.array(directions[index])
+            distances = calculate_steps(next_state, direction, positions, danger)
+            if distances.size:
+                scores[i] += np.sum(weights[object_name] * amount / (distances + 1))
+    
+    # escape_positions
+    if danger[x][y] > 0:
+        scores[i] += len(safe_positions[index]) * 20
 
     # Determine the best candidates with the maximum score
     best_indices = candidates[scores == scores.max()]

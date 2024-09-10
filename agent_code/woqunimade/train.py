@@ -21,7 +21,6 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 PLACEHOLDER_EVENT = "PLACEHOLDER"
 MOVE_TO_TARGET = "MOVE_TO_TARGET"
 MOVE_TO_DANGER = "MOVE_TO_DANGER"
-TRY_TO_ESCAPE = "TRY_TO_ESCAPE"
 ATTACK_CRATE = "ATTACK_CRATE"
 ATTACK_ENEMY = "ATTACK_ENEMY"
 
@@ -132,8 +131,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         events.append(MOVE_TO_TARGET)
     if old_feature[ACTIONS.index(self_action)] == "danger":
         events.append(MOVE_TO_DANGER)
-    if old_feature[ACTIONS.index(self_action)] == "escape":
-        events.append(TRY_TO_ESCAPE)
     if self_action == 'BOMB':
         if old_feature[-2]:
             events.append(ATTACK_CRATE)
@@ -213,7 +210,6 @@ def reward_from_events(self, events: List[str]) -> int:
         e.GOT_KILLED: -100.,
         MOVE_TO_TARGET: 50,
         MOVE_TO_DANGER: -60,
-        TRY_TO_ESCAPE: 60,
         ATTACK_CRATE: 40,
         ATTACK_ENEMY: 80,
     }

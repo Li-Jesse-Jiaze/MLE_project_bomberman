@@ -6,6 +6,31 @@ import settings as s
 DIRECTIONS = [(0, -1), (1, 0), (0, 1), (-1, 0)] # UP, RIGHT, DOWN, LEFT
 DIRECTIONS_INCLUDING_WAIT = DIRECTIONS + [(0, 0)]
 
+walls = np.zeros((s.COLS, s.ROWS), int)
+walls[:1, :] = -1
+walls[-1:, :] = -1
+walls[:, :1] = -1
+walls[:, -1:] = -1
+for x in range(s.COLS):
+    for y in range(s.ROWS):
+        if (x + 1) * (y + 1) % 2 == 1:
+            walls[x, y] = -1
+
+bomb_impact_matrix = np.zeros((s.COLS * s.ROWS, s.COLS * s.ROWS), dtype=int)
+for x in range(s.COLS):
+    for y in range(s.ROWS):
+        if walls[x, y] == -1:
+            continue
+        index = x * s.ROWS + y
+        # Explore the bomb range considering BOMB_POWER
+        for d in DIRECTIONS:
+            for steps in range(1, s.BOMB_POWER + 1):
+                nx, ny = x + d[0] * steps, y + d[1] * steps
+                if 0 <= nx < s.COLS and 0 <= ny < s.ROWS:
+                    if walls[nx, ny] == -1:
+                        break
+                    bomb_impact_matrix[index, nx * s.ROWS + ny] = 1
+
 
 def calculate_steps(game_state, pos, objects, danger):
     field, explosion_map, bombs, _, others, (x, y) = (
@@ -127,28 +152,8 @@ def is_safe_to_drop_bomb(game_state):
 
     return safe, crate
 
-def calculate_bomb_impact_matrix(field):
-    height, width = field.shape
-    bomb_impact_matrix = np.zeros((height * width, height * width), dtype=int)
-
-    for x in range(height):
-        for y in range(width):
-            if field[x, y] == -1:
-                continue
-            index = x * width + y
-            # Explore the bomb range considering BOMB_POWER
-            for d in DIRECTIONS:
-                for steps in range(1, s.BOMB_POWER + 1):
-                    nx, ny = x + d[0] * steps, y + d[1] * steps
-                    if 0 <= nx < height and 0 <= ny < width:
-                        if field[nx, ny] == -1:
-                            break
-                        bomb_impact_matrix[index, nx * width + ny] = 1
-    return bomb_impact_matrix
-
 
 def find_crates_neighbors(field):
-    bomb_impact_matrix = calculate_bomb_impact_matrix(field)
     height, width = field.shape
     crate_vector = (field == 1).astype(int).flatten()
     crate_counts = bomb_impact_matrix.dot(crate_vector)

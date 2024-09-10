@@ -204,7 +204,7 @@ def look_for_target(game_state, features, safe_positions):
     )
     danger = danger_map(field, bombs)
     candidates = np.array(list(safe_positions.keys()))
-    directions = [(x, y) + d for d in DIRECTIONS_INCLUDING_WAIT]
+    directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
     weights = {"crates": 1, "coins": 50, "enemy": 1}
 
     if not candidates.size:

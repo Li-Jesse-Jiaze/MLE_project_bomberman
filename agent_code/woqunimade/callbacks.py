@@ -95,8 +95,8 @@ def calculate_steps(game_state, pos, objects, danger):
     # BFS
     while q:
         x, y, steps = q.popleft()
-        if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] <= steps < s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
-            or explosion_map[x][y] > steps: # explosion while agent passing by
+        if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] < steps <= s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
+            or explosion_map[x][y] >= steps > 0: # explosion while agent passing by
             continue
         if (x, y) in target_index_map:
             idx = target_index_map[(x, y)]
@@ -123,7 +123,7 @@ def calculate_steps(game_state, pos, objects, danger):
 def predict_next_state(game_state, bomb_drop=False):
     next_state = copy.deepcopy(game_state)
     
-    field, explosion_map, bombs, _, _, (x, y) = (
+    _, explosion_map, bombs, _, _, (x, y) = (
         next_state['field'], next_state['explosion_map'], next_state['bombs'],
         next_state['coins'], next_state['others'], next_state['self'][-1]
     )
@@ -152,6 +152,7 @@ def trigger_explosion(position, game_state):
     explosion_range = s.BOMB_POWER
     directions = DIRECTIONS
     
+    game_state['explosion_map'][x][y] = s.EXPLOSION_TIMER
     for dx, dy in directions:
         for step in range(1, explosion_range + 1):
             nx, ny = x + dx * step, y + dy * step
@@ -162,8 +163,6 @@ def trigger_explosion(position, game_state):
             game_state['explosion_map'][nx][ny] = s.EXPLOSION_TIMER
             if game_state['field'][nx][ny] == 1:
                 game_state['field'][nx][ny] = 0
-            
-            game_state['others'] = [other for other in game_state['others'] if other[-1] != (nx, ny)]
 
             
 def is_safe_to_drop_bomb(game_state):
@@ -243,7 +242,7 @@ def find_safe_positions(game_state, danger, max_steps=5):
     while q:
         x, y, steps, first_step = q.popleft()
         if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] < steps <= s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
-            or explosion_map[x][y] > steps: # explosion while agent passing by
+            or explosion_map[x][y] >= steps > 0: # explosion while agent passing by
             continue
         if steps == max_steps:
             if first_step not in first_step_to_safes:

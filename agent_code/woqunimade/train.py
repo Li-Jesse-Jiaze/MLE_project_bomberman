@@ -22,7 +22,8 @@ PLACEHOLDER_EVENT = "PLACEHOLDER"
 MOVE_TO_TARGET = "MOVE_TO_TARGET"
 MOVE_TO_DANGER = "MOVE_TO_DANGER"
 TRY_TO_ESCAPE = "TRY_TO_ESCAPE"
-ATTACK_SOMETHING = "ATTACK_SOMETHING"
+ATTACK_CRATE = "ATTACK_CRATE"
+ATTACK_ENEMY = "ATTACK_ENEMY"
 
 def setup_training(self):
     """
@@ -134,8 +135,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if old_feature[ACTIONS.index(self_action)] == "escape":
         events.append(TRY_TO_ESCAPE)
     if self_action == 'BOMB':
-        if 'crate' in old_feature[:4] or 'enemy' in old_feature[:4]:
-            events.append(ATTACK_SOMETHING)
+        if old_feature[-2]:
+            events.append(ATTACK_CRATE)
+        elif old_feature[-1]:
+            events.append(ATTACK_ENEMY)
 
     reward = reward_from_events(self, events)
 
@@ -211,7 +214,8 @@ def reward_from_events(self, events: List[str]) -> int:
         MOVE_TO_TARGET: 50,
         MOVE_TO_DANGER: -60,
         TRY_TO_ESCAPE: 60,
-        ATTACK_SOMETHING: 80,
+        ATTACK_CRATE: 40,
+        ATTACK_ENEMY: 80,
     }
     reward_sum = 0
     for event in events:

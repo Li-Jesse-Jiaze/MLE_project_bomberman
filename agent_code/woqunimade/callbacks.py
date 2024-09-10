@@ -167,15 +167,52 @@ def trigger_explosion(position, game_state):
             
 def is_safe_to_drop_bomb(game_state):
     next_state = predict_next_state(game_state, True)
-    field, _, bombs, _, _, _ = (
+    field, _, bombs, _, others, (x, y) = (
         next_state['field'], next_state['explosion_map'], next_state['bombs'],
         next_state['coins'], next_state['others'], next_state['self'][-1]
     )
     danger = danger_map(field, bombs)
+    crate = False
+    enemy = False
+    safe = True
+
     safe_positions = find_safe_positions(next_state, danger)
     if not safe_positions:
-        return False
-    return True
+        safe = False
+        return safe, crate, enemy
+
+    explosion_range = s.BOMB_POWER
+    directions = DIRECTIONS
+
+    for (dx, dy) in directions:
+        for step in range(1, explosion_range + 1):
+            nx, ny = x + dx * step, y + dy * step
+            if 0 <= nx < danger.shape[0] and 0 <= ny < danger.shape[1]:
+                if field[nx, ny] == -1:
+                    break
+                elif field[nx, ny] == 1:
+                    crate = True
+                    break
+        if crate:
+            break
+    
+    for (dx, dy) in directions:
+        for step in range(1, explosion_range + 1):
+            nx, ny = x + dx * step, y + dy * step
+            if  0 <= nx < danger.shape[0] and 0 <= ny < danger.shape[1]:
+                if field[nx, ny] == -1:
+                    break
+                elif enemy:
+                    break
+                else:
+                    for other in others:
+                        if other[-1] == (nx, ny):
+                            enemy = True
+                            break
+        if enemy:
+            break
+
+    return safe, crate, enemy
 
 
 def find_crates_neighbors(field):
@@ -336,6 +373,13 @@ def state_to_features(game_state: dict):
     if 'coin' not in features[:4]:
         safe_positions = find_safe_positions(game_state, danger)
         look_for_target(game_state, features, safe_positions)
-    features.append(str(game_state['self'][2] & is_safe_to_drop_bomb(game_state)))  # Append bomb_left
-
+    
+    if game_state['self'][2]:
+        safe, crate, enemy = is_safe_to_drop_bomb(game_state)
+    else:
+        safe, crate, enemy = False, False, False
+    features.append(str(safe))
+    features.append(str(crate))
+    features.append(str(enemy))
+    
     return features

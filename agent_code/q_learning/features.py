@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 from typing import List, Dict, Tuple
+import copy
 import settings as s
 
 
@@ -50,11 +51,96 @@ class Feature:
         danger_map = self.bomb_impact_matrix.dot(bomb_map.flatten()).reshape((s.COLS, s.ROWS))
         return danger_map
 
-    def find_safe_position(self) -> List[bool]:
-        pass
+    def find_safe_position(self, state, max_steps=5) -> List[int]:
+        field, explosion_map, bombs, _, others, pos = (
+            state['field'], state['explosion_map'], state['bombs'],
+            state['coins'], state['others'], state['self'][-1]
+        )
+        danger = self.calculate_danger_map(bombs)
+        directions = DIRECTIONS_INCLUDING_WAIT
+        first_step_to_safes = {}
+        q = deque()
+        q.append((pos[0], pos[1], 0, None))
+        while q:
+            x, y, steps, first_step = q.popleft()
+            if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] < steps <= s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
+                or explosion_map[x][y] >= steps > 0: # explosion while agent passing by
+                continue
+            if steps == max_steps:
+                if first_step not in first_step_to_safes:
+                    first_step_to_safes[first_step] = []
+                if (x, y) not in first_step_to_safes[first_step]:
+                    first_step_to_safes[first_step].append((x, y))
+                continue
+            for i, (dx, dy) in enumerate(directions):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
+                    if not (field[nx, ny] == 0 or (field[nx, ny] == 1 and steps > s.BOMB_TIMER - danger[nx][ny] + s.EXPLOSION_TIMER)):
+                        continue
+                    if any((nx, ny) == other[-1] for other in others) and steps == 0:
+                        continue
+                    bomb_prevent = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
+                    if bomb_prevent:
+                        continue
+                    new_first_step = i if first_step is None else first_step
+                    if steps < max_steps:
+                        q.append((nx, ny, steps + 1, new_first_step))
+        safe_position = [0] * 5
+        for i in range(5):
+            if i in first_step_to_safes:
+                safe_position[i] = len(first_step_to_safes[i])
+        return safe_position
+
+    def predict_next_state(self, bomb_drop=False):
+        next_state = copy.deepcopy(self.game_state)
+        
+        _, explosion_map, bombs, _, _, (x, y) = (
+            next_state['field'], next_state['explosion_map'], next_state['bombs'],
+            next_state['coins'], next_state['others'], next_state['self'][-1]
+        )
+        new_bombs = []
+
+        def trigger_explosion(position, game_state):
+            x, y = position
+            explosion_range = s.BOMB_POWER
+            directions = DIRECTIONS
+            
+            game_state['explosion_map'][x][y] = s.EXPLOSION_TIMER
+            for dx, dy in directions:
+                for step in range(1, explosion_range + 1):
+                    nx, ny = x + dx * step, y + dy * step
+                    if not (0 <= nx < len(game_state['field']) and 0 <= ny < len(game_state['field'][0])):
+                        break
+                    if game_state['field'][nx][ny] == -1:
+                        break
+                    game_state['explosion_map'][nx][ny] = s.EXPLOSION_TIMER
+                    if game_state['field'][nx][ny] == 1:
+                        game_state['field'][nx][ny] = 0
+
+        for (x_bomb, y_bomb), timer in bombs:
+            if timer == 0:
+                trigger_explosion((x_bomb, y_bomb), next_state)
+            else:
+                new_bombs.append(((x_bomb, y_bomb), timer - 1))
+
+        if bomb_drop:
+            new_bombs.append(((x, y), s.BOMB_TIMER-1))
+
+        next_state['bombs'] = new_bombs
+        
+        for x in range(len(explosion_map)):
+            for y in range(len(explosion_map[0])):
+                if explosion_map[x][y] > 0:
+                    explosion_map[x][y] -= 1
+
+        return next_state
 
     def is_safe_to_drop_bomb(self) -> bool:
-        pass
+        next_state = self.predict_next_state(True)
+        safe_positions = self.find_safe_position(next_state)
+        if sum(safe_positions) == 0:
+            return False
+        return True
 
     def BFS(self, x, y) -> np.ndarray:
         distance = np.full_like(self.game_state['field'], np.inf)

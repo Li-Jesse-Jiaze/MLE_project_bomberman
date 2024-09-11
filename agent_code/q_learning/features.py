@@ -14,7 +14,7 @@ class Feature:
     bomb_impact_matrix: np.ndarray
     # var
     game_state: Dict
-    feature: List[str]
+    feature: List[str] = None
 
     def __init__(self) -> None:
         # TODO: Init self.bomb_impact_matrix
@@ -51,10 +51,9 @@ class Feature:
         danger_map = self.bomb_impact_matrix.dot(bomb_map.flatten()).reshape((s.COLS, s.ROWS))
         return danger_map
 
-    def find_safe_position(self, state, max_steps=5) -> List[int]:
-        field, explosion_map, bombs, _, others, pos = (
-            state['field'], state['explosion_map'], state['bombs'],
-            state['coins'], state['others'], state['self'][-1]
+    def find_safe_position(self, pos, state, max_steps=5) -> List[int]:
+        field, explosion_map, bombs, others = (
+            state['field'], state['explosion_map'], state['bombs'], state['others']
         )
         danger = self.calculate_danger_map(bombs)
         directions = DIRECTIONS_INCLUDING_WAIT
@@ -75,7 +74,7 @@ class Feature:
             for i, (dx, dy) in enumerate(directions):
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
-                    if not (field[nx, ny] == 0 or (field[nx, ny] == 1 and steps > s.BOMB_TIMER - danger[nx][ny] + s.EXPLOSION_TIMER)):
+                    if not (field[nx, ny] == 0 or (field[nx, ny] == 1 and steps > s.BOMB_TIMER - danger[nx][ny] + s.EXPLOSION_TIMER and danger[nx][ny] > 0)):
                         continue
                     if any((nx, ny) == other[-1] for other in others) and steps == 0:
                         continue
@@ -151,7 +150,12 @@ class Feature:
         pass
 
     def is_chance_to_attack(self) -> bool:
-        pass
+        next_state = self.predict_next_state(True)
+        others_pos = [o[-1] for o in self.game_state['others']]
+        for op in others_pos:
+            if sum(self.find_safe_position(op, next_state)) == 0:
+                return True
+        return False
 
     def __call__(self, game_state: Dict) -> List[str]:
         self.game_state = game_state

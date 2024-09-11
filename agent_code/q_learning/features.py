@@ -33,6 +33,7 @@ class Feature:
                 if walls[x, y] == -1:
                     continue
                 index = x * s.ROWS + y
+                self.bomb_impact_matrix[index, index] = 1
                 # Explore the bomb range considering BOMB_POWER
                 for d in DIRECTIONS:
                     for steps in range(1, s.BOMB_POWER + 1):
@@ -42,8 +43,12 @@ class Feature:
                                 break
                             self.bomb_impact_matrix[index, nx * s.ROWS + ny] = 1
 
-    def calculate_danger_map(self) -> np.ndarray:
-        pass
+    def calculate_danger_map(self, bombs) -> np.ndarray:
+        bomb_map = np.zeros((s.COLS, s.ROWS), int)
+        for (x_bomb, y_bomb), timer in bombs:
+            bomb_map[x_bomb, y_bomb] = s.BOMB_TIMER - timer
+        danger_map = self.bomb_impact_matrix.dot(bomb_map.flatten()).reshape((s.COLS, s.ROWS))
+        return danger_map
 
     def find_safe_position(self) -> List[bool]:
         pass

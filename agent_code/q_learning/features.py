@@ -92,7 +92,7 @@ class Feature:
                 safe_position[i] = len(first_step_to_safes[i])
         return safe_position
 
-    def predict_next_state(self, bomb_drop=False):
+    def predict_next_state(self, bomb_drop=None):
         next_state = copy.deepcopy(self.game_state)
         
         _, explosion_map, bombs, _, _, (x, y) = (
@@ -125,24 +125,24 @@ class Feature:
                 new_bombs.append(((x_bomb, y_bomb), timer - 1))
 
         if bomb_drop:
-            new_bombs.append(((x, y), s.BOMB_TIMER-1))
+            new_bombs.append((bomb_drop, s.BOMB_TIMER-1))
 
         next_state['bombs'] = new_bombs
         explosion_map -= (explosion_map > 0).astype(int)
         return next_state
 
-    def is_safe_to_drop_bomb(self) -> bool:
-        next_state = self.predict_next_state(True)
+    def is_safe_to_drop_bomb(self, pos) -> bool:
+        next_state = self.predict_next_state(pos)
         safe_positions = self.find_safe_position(next_state)
         if sum(safe_positions) == 0:
             return False
         return True
 
-    def BFS(self, x, y) -> np.ndarray:
-        distance = np.full_like(self.game_state['field'], np.inf)
+    def BFS(self, game_state, x, y) -> np.ndarray:
+        distance = np.full_like(game_state['field'], np.inf)
         field, explosion_map, bombs, _, others = (
-            self.game_state['field'], self.game_state['explosion_map'], self.game_state['bombs'],
-            self.game_state['coins'], self.game_state['others']
+            game_state['field'], game_state['explosion_map'], game_state['bombs'],
+            game_state['coins'], game_state['others']
         )
         danger = self.calculate_danger_map(bombs)
         directions = DIRECTIONS_INCLUDING_WAIT
@@ -179,14 +179,72 @@ class Feature:
                     visited.add((nx, ny))
                     q.append((nx, ny, steps + 1))
         return distance
+    
+    def find_crates_neighbors(self, field):
+        height, width = field.shape
+        crate_vector = (field == 1).astype(int).flatten()
+        crate_counts = self.bomb_impact_matrix.dot(crate_vector)
+        crate_counts_matrix = crate_counts.reshape(height, width)
+        result_matrix = np.where(field == 0, crate_counts_matrix, 0)
 
-    def look_for_target(self) -> int:
-        # use bfs
-        pass
+        return result_matrix
+
+    def look_for_target(self, safe) -> int:
+        if sum(safe) == 0:
+            return -1
+        next_state = self.predict_next_state()
+        field, _, bombs, coins, others, (x, y) = (
+            next_state['field'], next_state['explosion_map'], next_state['bombs'],
+            next_state['coins'], next_state['others'], next_state['self'][-1]
+        )
+        danger = self.calculate_danger_map(bombs)
+        directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
+        weights = {"crates": 1, "coins": 50, "enemy": 1, "escape": 20}
+
+        coin_map = np.zeros_like(field)
+        for coin in coins:
+            coin_map[coin[0]][coin[1]] = 1
+        enemy_map = np.zeros_like(field)
+        for other in others:
+            enemy_map[other[-1][0]][other[-1][1]] = 1
+        crate_map = self.find_crates_neighbors(field)
+
+        score = {index: 0 for index in range(5) if safe[i]}
+        for index in score.keys():
+            nx, ny = x + directions[index][0], y + directions[index][1]
+            distance = self.BFS(next_state, nx, ny)
+            coins_score = weights['coins'] * (coin_map / (distance + 1))
+            enemy_score = weights['enemy'] * (enemy_map / (distance + 1))
+            crates_score = weights['crates'] * (crate_map / (distance + 1))
+            for i in crates_score.shape[0]:
+                for j in crates_score.shape[1]:
+                    if crates_score[i][j] > 0:
+                        crates_score[i][j] *= self.is_safe_to_drop_bomb((i, j))
+            score[index] += np.sum(coins_score + enemy_score + crates_score)
+
+            # escape_positions
+            if danger[x][y] > 0:
+                score[index] += len(safe[index]) * weights['escape']
+
+        target = [index for index in score.keys() if score[index] == max(score.values)]
+        target = np.random.choice(target)
+        if target == 4:
+            if crate_map[x][y] > 0:
+                if self.is_safe_to_drop_bomb([x, y]):
+                    target = 5
+                else:
+                    score[target] = 0
+                    if sum(score.values) == 0:
+                        return 4
+                    target = [index for index in score.keys() if score[index] == max(score.values)]
+                    target = np.random.choice(target)
+
+        return target
+
 
     def is_chance_to_attack(self) -> bool:
         state_0 = copy.deepcopy(self.game_state)
-        state_1 = self.predict_next_state(True)
+        state_1 = self.predict_next_state(self.game_state['self'][-1])
         state_1['bombs'] = copy.deepcopy(self.game_state['bombs'])
         state_1['bombs'].append((self.game_state['self'][-1], s.BOMB_TIMER-1))
         for i in range(len(state_1['others'])):

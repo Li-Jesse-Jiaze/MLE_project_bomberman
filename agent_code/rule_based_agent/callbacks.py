@@ -1,5 +1,6 @@
 from collections import deque
 from random import shuffle
+from agent_code.q_learning.features import Feature
 
 import numpy as np
 
@@ -80,6 +81,7 @@ def setup(self):
     # While this timer is positive, agent will not hunt/attack opponents
     self.ignore_others_timer = 0
     self.current_round = 0
+    self.feature = Feature()
 
 
 def reset_self(self):
@@ -97,6 +99,7 @@ def act(self, game_state):
     which is a dictionary. Consult 'get_state_for_agent' in environment.py to see
     what it contains.
     """
+    self.feature(game_state)
     self.logger.info("Picking action according to rule set")
     # Check if we are in a different round
     if game_state["round"] != self.current_round:

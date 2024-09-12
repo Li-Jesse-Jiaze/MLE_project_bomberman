@@ -11,6 +11,7 @@ DIRECTIONS_INCLUDING_WAIT = DIRECTIONS + [(0, 0)]
 
 class Feature:
     # const
+    walls: np.ndarray
     bomb_impact_matrix: np.ndarray
     # var
     game_state: Dict
@@ -27,6 +28,7 @@ class Feature:
             for y in range(s.ROWS):
                 if (x + 1) * (y + 1) % 2 == 1:
                     walls[x, y] = -1
+        self.walls = walls
 
         self.bomb_impact_matrix = np.zeros((s.COLS * s.ROWS, s.COLS * s.ROWS), dtype=int)
         for x in range(s.COLS):
@@ -48,12 +50,12 @@ class Feature:
         bomb_map = np.zeros((s.COLS, s.ROWS), int)
         for (x_bomb, y_bomb), timer in bombs:
             bomb_map[x_bomb, y_bomb] = s.BOMB_TIMER - timer
-        danger_map = self.bomb_impact_matrix.dot(bomb_map.flatten()).reshape((s.COLS, s.ROWS))
+        danger_map = (self.bomb_impact_matrix * bomb_map.flatten()).max(1).reshape((s.COLS, s.ROWS))
         return danger_map
 
-    def find_safe_position(self, pos, state, max_steps=5) -> List[int]:
-        field, explosion_map, bombs, others = (
-            state['field'], state['explosion_map'], state['bombs'], state['others']
+    def find_safe_position(self, state, max_steps=5) -> List[int]:
+        field, explosion_map, bombs, others, pos = (
+            state['field'], state['explosion_map'], state['bombs'], state['others'], state['self'][-1]
         )
         danger = self.calculate_danger_map(bombs)
         directions = DIRECTIONS_INCLUDING_WAIT
@@ -126,12 +128,7 @@ class Feature:
             new_bombs.append(((x, y), s.BOMB_TIMER-1))
 
         next_state['bombs'] = new_bombs
-        
-        for x in range(len(explosion_map)):
-            for y in range(len(explosion_map[0])):
-                if explosion_map[x][y] > 0:
-                    explosion_map[x][y] -= 1
-
+        explosion_map -= (explosion_map > 0).astype(int)
         return next_state
 
     def is_safe_to_drop_bomb(self) -> bool:
@@ -150,10 +147,14 @@ class Feature:
         pass
 
     def is_chance_to_attack(self) -> bool:
-        next_state = self.predict_next_state(True)
-        others_pos = [o[-1] for o in self.game_state['others']]
-        for op in others_pos:
-            if sum(self.find_safe_position(op, next_state)) == 0:
+        state_0 = copy.deepcopy(self.game_state)
+        state_1 = self.predict_next_state(True)
+        state_1['bombs'] = copy.deepcopy(self.game_state['bombs'])
+        state_1['bombs'].append((self.game_state['self'][-1], s.BOMB_TIMER-1))
+        for i in range(len(state_1['others'])):
+            state_0['self'], state_0['others'][i] = state_0['others'][i], state_0['self']
+            state_1['self'], state_1['others'][i] = state_1['others'][i], state_1['self']
+            if sum(self.find_safe_position(state_0)) != 0 and sum(self.find_safe_position(state_1)) == 0 and self.find_safe_position(self.game_state)[-1]:
                 return True
         return False
 

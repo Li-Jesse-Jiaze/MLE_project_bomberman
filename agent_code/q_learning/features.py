@@ -295,7 +295,7 @@ class Feature:
         # Step 3: Figure 'target' if feature[i] is free and safe
             # Step 3.1: Check if is a chance to attack
         target = self.look_for_target(safe, self.game_state['self'][2])
-        if target > 0:
+        if target >= 0:
             self.features[target] = 'target'
         if self.is_chance_to_kill() and self.features[-1] != 'dead':
             self.features[-1] = 'KILL!'

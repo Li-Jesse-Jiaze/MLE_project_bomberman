@@ -140,6 +140,44 @@ class Feature:
 
     def BFS(self, x, y) -> np.ndarray:
         distance = np.full_like(self.game_state['field'], np.inf)
+        field, explosion_map, bombs, _, others = (
+            self.game_state['field'], self.game_state['explosion_map'], self.game_state['bombs'],
+            self.game_state['coins'], self.game_state['others']
+        )
+        danger = self.calculate_danger_map(bombs)
+        directions = DIRECTIONS_INCLUDING_WAIT
+
+        q = deque()
+        q.append((x, y, 0))
+
+        visited = set()
+        visited.add(tuple((x, y)))
+
+        if bombs:
+            max_wait_steps = max(bomb[-1] for bomb in bombs) + s.EXPLOSION_TIMER + 1
+        else:
+            max_wait_steps = explosion_map.max() + 1
+        
+        # BFS
+        while q:
+            x, y, steps = q.popleft()
+            if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] < steps <= s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
+                or explosion_map[x][y] >= steps > 0: # explosion while agent passing by
+                continue
+            distance[x][y] = min(distance[x][y], steps)
+            for dx, dy in directions:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and \
+                    not (steps >= max_wait_steps and (nx, ny) in visited):
+                    if not (field[nx, ny] == 0 or (field[nx, ny] == 1 and steps > s.BOMB_TIMER - danger[nx][ny] + s.EXPLOSION_TIMER and danger[nx][ny] > 0)):
+                        continue
+                    if any((nx, ny) == other[-1] for other in others) and steps == 0:
+                        continue
+                    bomb_prevent = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
+                    if bomb_prevent:
+                        continue
+                    visited.add((nx, ny))
+                    q.append((nx, ny, steps + 1))
         return distance
 
     def look_for_target(self) -> int:

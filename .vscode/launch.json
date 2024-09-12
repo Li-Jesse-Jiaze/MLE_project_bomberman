@@ -12,8 +12,9 @@
             "console": "integratedTerminal",
             "args": [
                 "play",
-                "--my-agent", "woqunimade",
-                "--n-rounds", "10"
+                "--my-agent", "q_learning",
+                "--n-rounds", "10000",
+                "--no-gui"
             ]
         }
     ]

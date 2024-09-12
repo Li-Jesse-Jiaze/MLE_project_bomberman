@@ -231,7 +231,7 @@ class Feature:
         target = np.random.choice(target)
         if target == 4:
             if crate_map[x][y] > 0:
-                if self.is_safe_to_drop_bomb([x, y]) and self.game_state['self'][2]:
+                if self.is_safe_to_drop_bomb((x, y)) and has_bomb and safe[4]:
                     target = 5
                 else:
                     score[target] = 0
@@ -295,7 +295,8 @@ class Feature:
         # Step 3: Figure 'target' if feature[i] is free and safe
             # Step 3.1: Check if is a chance to attack
         target = self.look_for_target(safe, self.game_state['self'][2])
-        self.features[target] = 'target'
+        if target > 0:
+            self.features[target] = 'target'
         if self.is_chance_to_kill() and self.features[-1] != 'dead':
             self.features[-1] = 'KILL!'
         return self.features

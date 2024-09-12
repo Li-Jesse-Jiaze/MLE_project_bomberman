@@ -41,12 +41,10 @@ def adjust_state(state, rotation=0, flip_horizontal=False, flip_vertical=False):
         directions[0], directions[2] = directions[2], directions[0]  # Swap 'UP' and 'DOWN'
 
     # Update the state according to the new direction list
-    new_state = [0] * 8
+    new_state = [0] * 6
     for i, dir in enumerate(directions):
         new_state[i] = state[direction_index[dir]]
     new_state[4] = state[4]  # 'CENTER' remains unchanged
     new_state[5] = state[5]  # 'BOMBS_LEFT' remains unchanged
-    new_state[6] = state[6]  # 'CRATE_IN_BOMB' remains unchanged
-    new_state[7] = state[7]  # 'ENEMY_IN_BOMB' remains unchanged
 
     return new_state

@@ -64,11 +64,11 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    feature = self.feature(game_state)
-    self.logger.debug(f"feature: {feat2str(feature)}")
+    features = self.feature(game_state)
+    self.logger.debug(f"feature: {feat2str(features)}")
 
     # If train with itself
     if game_state["round"] % 500 == 0 and game_state["step"] == 1:
         setup(self)
 
-    return choose_action(self, feature)
+    return choose_action(self, features)

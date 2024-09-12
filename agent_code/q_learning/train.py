@@ -6,11 +6,11 @@ from .table import Table
 from .symmetry import adjust_action, adjust_state
 
 # Events
+MOVE_TO_DEAD = "MOVE_TO_DEAD"
 MOVE_TO_TARGET = "MOVE_TO_TARGET"
-MOVE_TO_DANGER = "MOVE_TO_DANGER"
-ATTACK_CRATE = "ATTACK_CRATE"
+ATTACK_TARGET = "ATTACK_TARGET"
 ATTACK_ENEMY = "ATTACK_ENEMY"
-ILLEGAL_BOMB = "ILLEGAL_BOMB"
+KILL_ENEMY = "KILL_ENEMY"
 
 def setup_training(self):
     """
@@ -20,11 +20,11 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.epsilon = 0.5
+    self.epsilon = 1.0
     self.epsilon_min = 0.01
     self.epsilon_decay = 0.999
-    self.gamma = 0.9
-    self.alpha = 0.1
+    self.gamma = 0.65
+    self.alpha = 0.25
     self.q_table = Table()
     try:
         self.q_table.load_from_json('q_table.json')
@@ -83,15 +83,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Idea: Add your own events to hand out rewards
     if old_feature[ACTIONS.index(self_action)] == "target":
         events.append(MOVE_TO_TARGET)
-    if old_feature[ACTIONS.index(self_action)] == "danger" or old_feature[ACTIONS.index(self_action)] == 'bomb':
-        events.append(MOVE_TO_DANGER)
+    if old_feature[ACTIONS.index(self_action)] == "dead":
+        events.append(MOVE_TO_DEAD)
     if self_action == 'BOMB':
-        if not eval(old_feature[-3]):
-            events.append(ILLEGAL_BOMB)
-        elif eval(old_feature[-2]):
-            events.append(ATTACK_CRATE)
-        elif eval(old_feature[-1]):
+        if 'enemy' in old_feature:
             events.append(ATTACK_ENEMY)
+        if old_feature[-1] == 'target':
+            events.append(ATTACK_TARGET)
+        if old_feature[-1] == 'KILL!':
+            events.append(KILL_ENEMY)
 
     reward = reward_from_events(self, events)
 
@@ -147,11 +147,11 @@ def reward_from_events(self, events: List[str]) -> int:
         e.KILLED_OPPONENT: 100.,
         e.KILLED_SELF: -300.,
         e.GOT_KILLED: -100.,
-        MOVE_TO_TARGET: 50,
-        MOVE_TO_DANGER: -60,
-        ATTACK_CRATE: 40,
-        ATTACK_ENEMY: 80,
-        ILLEGAL_BOMB: -500,
+        MOVE_TO_DEAD: -100,
+        MOVE_TO_TARGET: 100,
+        ATTACK_TARGET: 50,
+        ATTACK_ENEMY: 20,
+        KILL_ENEMY: 100
     }
     reward_sum = 0
     for event in events:

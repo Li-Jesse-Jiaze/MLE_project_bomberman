@@ -17,6 +17,8 @@ class Feature:
     game_state: Dict
     features: List[str] = None
 
+    main_enemy: str = None
+
     def __init__(self) -> None:
         # TODO: Init self.bomb_impact_matrix
         walls = np.zeros((s.COLS, s.ROWS), int)
@@ -199,16 +201,17 @@ class Feature:
         )
         danger = self.calculate_danger_map(bombs)
         directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
-        weights_with_bomb = {"crates": 1, "coins": 50, "enemy": 1, "escape": 20}
-        weights_without_bomb = {"crates": 1, "coins": 50, "enemy": 0, "escape": 200}
+        weights_with_bomb = {"crates": 1, "coins": 500, "enemy": 40, "escape": 200}
+        weights_without_bomb = {"crates": 1, "coins": 500, "enemy": -200, "escape": 2000}
         weights = weights_with_bomb if has_bomb else weights_without_bomb
 
         coin_map = np.zeros_like(field)
         for coin in coins:
             coin_map[coin[0]][coin[1]] = 1
-        enemy_map = np.zeros_like(field)
-        for other in others:
-            enemy_map[other[-1][0]][other[-1][1]] = 1
+        enemy0_map = np.zeros_like(field)
+        if self.main_enemy:
+            enemy0 = {other[0]: other[-1] for other in others}[self.main_enemy]
+            enemy0_map[enemy0[0]][enemy0[1]] = 1
         crate_map = self.find_crates_neighbors(field)
 
         score = {index: 0 for index in range(5) if safe[index]}
@@ -216,7 +219,7 @@ class Feature:
             nx, ny = directions[index]
             distance = self.BFS(next_state, nx, ny)
             coins_score = weights['coins'] * (coin_map / (distance + 1))
-            enemy_score = weights['enemy'] * (enemy_map / (distance + 1))
+            enemy_score = weights['enemy'] * (enemy0_map / (distance + 1))
             crates_score = weights['crates'] * (crate_map / (distance + 1))
             for i in range(crates_score.shape[0]):
                 for j in range(crates_score.shape[1]):
@@ -230,16 +233,14 @@ class Feature:
         target = [index for index in score.keys() if score[index] == max(score.values())]
         target = np.random.choice(target)
         if target == 4:
-            if crate_map[x][y] > 0:
-                if self.is_safe_to_drop_bomb((x, y)) and has_bomb and safe[4]:
-                    target = 5
-                else:
-                    score[target] = 0
-                    if sum(score.values()) == 0:
-                        return 4
-                    target = [index for index in score.keys() if score[index] == max(score.values())]
-                    target = np.random.choice(target)
-
+            if crate_map[x][y] > 0 and self.is_safe_to_drop_bomb((x, y)) and has_bomb:
+                target = 5
+            else:
+                score[4] = -np.inf
+                if not any(score.values()):
+                    return 4
+                target = [index for index in score.keys() if score[index] == max(score.values())]
+                target = np.random.choice(target)
         return target
 
 
@@ -255,8 +256,21 @@ class Feature:
                 return True
         return False
 
+    def find_main_enemy(self):
+        if len(self.game_state['others']):
+            return min(
+                self.game_state['others'],
+                key=lambda other: abs(self.game_state['self'][-1][0] - other[-1][0]) + abs(self.game_state['self'][-1][1] - other[-1][1])
+            )[0]
+        return None
+
     def __call__(self, game_state: Dict) -> List[str]:
         self.game_state = game_state
+        if len(game_state['others']):
+            if self.main_enemy not in [o[0] for o in game_state['others']]:
+                self.main_enemy = self.find_main_enemy()
+        else:
+            self.main_enemy = None
         # Calculate feature list [up, right, down, left, center, bomb]
         # Step 1: Init what is in feature
         if game_state is None:
@@ -269,7 +283,7 @@ class Feature:
 
         self.features = []
         directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT] # UP, RIGHT, DOWN, LEFT, WAIT
-        field_labels = {1: 'crate', -1: 'wall', 0: 'free'}
+        field_labels = {1: 'block', -1: 'block', 0: 'free'}
         
         for i, j in directions:
             tile = field_labels[field[i, j]]
@@ -279,7 +293,7 @@ class Feature:
                 elif any(op[-1] == (i, j) for op in others):
                     tile = 'enemy'
                 elif any((b[0] == i and b[1] == j) for b, _ in bombs):
-                    tile = 'bomb'
+                    tile = 'block'
                 elif any((coin[0] == i and coin[1] == j) for coin in coins):
                     tile = 'coin'
             self.features.append(tile)

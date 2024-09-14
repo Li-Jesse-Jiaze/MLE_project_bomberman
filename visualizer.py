@@ -32,7 +32,7 @@ def calculate_moving_averages(scores_data, n):
         max_score = max([score for _, score in scores])
         for agent, score in scores:
             agent_scores[agent].append(score)
-            if score == max_score:
+            if score == max_score and max_score != 0:
                 agent_wins[agent].append(1)  # win
             else:
                 agent_wins[agent].append(0)  # loss

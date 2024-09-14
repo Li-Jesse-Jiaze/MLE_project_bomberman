@@ -97,7 +97,7 @@ class Feature:
     def predict_next_state(self, bomb_drop=None):
         next_state = copy.deepcopy(self.game_state)
         
-        _, explosion_map, bombs, _, _, (x, y) = (
+        _, explosion_map, bombs, _, _, _ = (
             next_state['field'], next_state['explosion_map'], next_state['bombs'],
             next_state['coins'], next_state['others'], next_state['self'][-1]
         )
@@ -128,6 +128,7 @@ class Feature:
 
         if bomb_drop:
             new_bombs.append((bomb_drop, s.BOMB_TIMER-1))
+            next_state['self'] = (*next_state['self'][:-1], bomb_drop)
 
         next_state['bombs'] = new_bombs
         explosion_map -= (explosion_map > 0).astype(int)
@@ -136,12 +137,16 @@ class Feature:
     def is_safe_to_drop_bomb(self, pos) -> bool:
         next_state = self.predict_next_state(pos)
         safe_positions = self.find_safe_position(next_state)
-        if sum(safe_positions) == 0:
-            return False
-        return True
+        return sum(1 for s in safe_positions if s != 0)
+        # if sum(safe_positions) == 0:
+        #     return False
+        # return True
 
     def BFS(self, game_state, x, y) -> np.ndarray:
-        distance = np.full(game_state['field'].shape, np.inf)
+        # distance = np.full(game_state['field'].shape, np.inf)
+        # Consider unreachable coins and others
+        m, n = game_state['field'].shape
+        distance = np.abs(np.arange(m)[:, None] - x) + np.abs(np.arange(n) - y) + 2 * (s.BOMB_POWER + s.EXPLOSION_TIMER)
         field, explosion_map, bombs, _, others = (
             game_state['field'], game_state['explosion_map'], game_state['bombs'],
             game_state['coins'], game_state['others']
@@ -201,8 +206,8 @@ class Feature:
         )
         danger = self.calculate_danger_map(bombs)
         directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
-        weights_with_bomb = {"crates": 1, "coins": 50, "enemy0": 5, "enemies": -1, "escape": 35}
-        weights_without_bomb = {"crates": 1, "coins": 50, "enemy0": -5, "enemies": -5, "escape": 35}
+        weights_with_bomb = {"crates": 1, "coins": 200, "enemy0": 5, "enemies": -1, "escape": 35}
+        weights_without_bomb = {"crates": 1, "coins": 200, "enemy0": -20, "enemies": -20, "escape": 35}
         weights = weights_with_bomb if has_bomb else weights_without_bomb
 
         coin_map = np.zeros_like(field)

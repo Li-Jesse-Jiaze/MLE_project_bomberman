@@ -201,8 +201,8 @@ class Feature:
         )
         danger = self.calculate_danger_map(bombs)
         directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
-        weights_with_bomb = {"crates": 1, "coins": 500, "enemy": 40, "escape": 200}
-        weights_without_bomb = {"crates": 1, "coins": 500, "enemy": -200, "escape": 2000}
+        weights_with_bomb = {"crates": 1, "coins": 50, "enemy0": 5, "enemies": -1, "escape": 35}
+        weights_without_bomb = {"crates": 1, "coins": 50, "enemy0": -5, "enemies": -5, "escape": 35}
         weights = weights_with_bomb if has_bomb else weights_without_bomb
 
         coin_map = np.zeros_like(field)
@@ -212,6 +212,9 @@ class Feature:
         if self.main_enemy:
             enemy0 = {other[0]: other[-1] for other in others}[self.main_enemy]
             enemy0_map[enemy0[0]][enemy0[1]] = 1
+        enemies_map = np.zeros_like(field)
+        for other in others:
+            enemies_map[other[-1][0]][other[-1][1]] = 1
         crate_map = self.find_crates_neighbors(field)
 
         score = {index: 0 for index in range(5) if safe[index]}
@@ -219,13 +222,14 @@ class Feature:
             nx, ny = directions[index]
             distance = self.BFS(next_state, nx, ny)
             coins_score = weights['coins'] * (coin_map / (distance + 1))
-            enemy_score = weights['enemy'] * (enemy0_map / (distance + 1))
+            enemy0_score = weights['enemy0'] * (enemy0_map / (distance + 1))
+            enemies_score = weights['enemies'] * (enemies_map / (distance + 1))
             crates_score = weights['crates'] * (crate_map / (distance + 1))
             for i in range(crates_score.shape[0]):
                 for j in range(crates_score.shape[1]):
                     if crates_score[i][j] > 0 and distance[i][j] < s.BOMB_TIMER:
                         crates_score[i][j] *= self.is_safe_to_drop_bomb((i, j))
-            score[index] += np.sum(coins_score + enemy_score + crates_score)
+            score[index] += np.sum(coins_score + enemy0_score + enemies_score + crates_score)
 
             # escape_positions
             if danger[x][y] > 0:
@@ -267,7 +271,7 @@ class Feature:
     def __call__(self, game_state: Dict) -> List[str]:
         self.game_state = game_state
         if len(game_state['others']):
-            if self.main_enemy not in [o[0] for o in game_state['others']]:
+            if self.main_enemy not in [o[0] for o in game_state['others']] or game_state['step'] % 30 == 0:
                 self.main_enemy = self.find_main_enemy()
         else:
             self.main_enemy = None

@@ -8,7 +8,7 @@ class Table(dict):
 
     def save_to_json(self, file_path='q_table.json'):
         with open(file_path, 'w') as file:
-            json.dump(self, file, indent=4)
+            json.dump(self, file)
     
     def load_from_json(self, file_path='q_table.json'):
         with open(file_path, 'r') as file:

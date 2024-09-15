@@ -1,5 +1,5 @@
 from .table import Table
-from .features import state_to_features
+from .features import Feature
 import random
 from typing import List
 
@@ -31,6 +31,7 @@ def setup(self):
         self.q_table = Table()
         self.q_table.load_from_json('q_table.json')
         self.logger.info("Loading model from saved state.")
+    self.feature = Feature()
 
 
 def choose_action(self, feature: List[str]) -> str:
@@ -44,7 +45,7 @@ def choose_action(self, feature: List[str]) -> str:
         if random.random() < self.epsilon:
             self.logger.debug("Choosing action purely at random.")
             # 80%: walk in any direction. 10% wait. 10% bomb.
-            return np.random.choice(ACTIONS, p=[0.2, 0.2, 0.2, 0.2, 0.1, 0.1])
+            return np.random.choice(ACTIONS)
         else:
             self.logger.debug(f"Querying model for action.:{best_action}")
             return best_action
@@ -63,11 +64,11 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    feature = state_to_features(game_state)
-    self.logger.debug(f"feature: {feature}")
+    features = self.feature(game_state)
+    self.logger.debug(f"feature: {feat2str(features)}")
 
     # If train with itself
     if game_state["round"] % 500 == 0 and game_state["step"] == 1:
         setup(self)
 
-    return choose_action(self, feature)
+    return choose_action(self, features)

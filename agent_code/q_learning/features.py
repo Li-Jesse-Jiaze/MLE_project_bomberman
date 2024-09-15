@@ -207,7 +207,7 @@ class Feature:
         danger = self.calculate_danger_map(bombs)
         directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
         weights_with_bomb = {"crates": 1, "coins": 200, "enemy0": 5, "enemies": -1, "escape": 35}
-        weights_without_bomb = {"crates": 1, "coins": 200, "enemy0": -20, "enemies": -20, "escape": 35}
+        weights_without_bomb = {"crates": 1, "coins": 200, "enemy0": -50, "enemies": -50, "escape": 35}
         weights = weights_with_bomb if has_bomb else weights_without_bomb
 
         coin_map = np.zeros_like(field)

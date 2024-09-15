@@ -198,58 +198,90 @@ class Feature:
     def look_for_target(self, safe: List[int], has_bomb: bool) -> int:
         if sum(safe) == 0:
             return -1
+        # Predict the next state and extract relevant information
         next_state = self.predict_next_state()
-        field, _, bombs, coins, others, (x, y) = (
-            next_state['field'], next_state['explosion_map'], next_state['bombs'],
-            next_state['coins'], next_state['others'], next_state['self'][-1]
-        )
-        danger = self.calculate_danger_map(bombs)
-        directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
-        weights_with_bomb = {"crates": 1, "coins": 200, "enemy0": 7, "enemies": -1, "escape": 35}
-        weights_without_bomb = {"crates": 1, "coins": 200, "enemy0": -200, "enemies": -50, "escape": 35}
-        weights = weights_with_bomb if has_bomb else weights_without_bomb
+        field = next_state['field']
+        bombs = next_state['bombs']
+        coins = next_state['coins']
+        others = next_state['others']
+        x, y = next_state['self'][-1]  # Current position
 
-        coin_map = np.zeros_like(field)
-        for coin in coins:
-            coin_map[coin[0]][coin[1]] = 1
-        enemy0_map = np.zeros_like(field)
+        danger = self.calculate_danger_map(bombs)
+        directions = [(x + dx, y + dy) for dx, dy in DIRECTIONS_INCLUDING_WAIT]
+
+        # Define weights based on safe or not
+        if has_bomb and danger[x, y] <= 0:
+            weights = {"crates": 1, "coins": 200, "enemy0": 20, "enemies": -4, "escape": 0}
+        else:
+            weights = {"crates": 1, "coins": 200, "enemy0": -50, "enemies": -50, "escape": 35}
+
+        # Initialize maps for coins, enemies, and crates
+        coin_map = np.zeros_like(field, dtype=float)
+        if coins:
+            coin_positions = np.array(coins)
+            coin_map[coin_positions[:, 0], coin_positions[:, 1]] = 1
+
+        enemies_map = np.zeros_like(field, dtype=float)
+        other_positions = np.array([other[-1] for other in others])
+        if other_positions.size > 0:
+            enemies_map[other_positions[:, 0], other_positions[:, 1]] = 1
+
+        enemy0_map = np.zeros_like(field, dtype=float)
         if self.main_enemy:
-            enemy0 = {other[0]: other[-1] for other in others}[self.main_enemy]
-            enemy0_map[enemy0[0]][enemy0[1]] = 1
-        enemies_map = np.zeros_like(field)
-        for other in others:
-            enemies_map[other[-1][0]][other[-1][1]] = 1
+            enemy_positions = {other[0]: other[-1] for other in others}
+            enemy0_pos = enemy_positions.get(self.main_enemy)
+            if enemy0_pos:
+                enemy0_map[enemy0_pos[0], enemy0_pos[1]] = 1
+
         crate_map = self.find_crates_neighbors(field)
 
+        # Initialize scores for actions that are safe
         score = {index: 0 for index in range(5) if safe[index]}
-        for index in score.keys():
+
+        # Calculate scores for each possible action
+        for index in score:
             nx, ny = directions[index]
             distance = self.BFS(next_state, nx, ny)
-            coins_score = weights['coins'] * (coin_map / (distance + 1))
-            enemy0_score = weights['enemy0'] * (enemy0_map / (distance + 1))
-            enemies_score = weights['enemies'] * (enemies_map / (distance + 1))
-            crates_score = weights['crates'] * (crate_map / (distance + 1))
-            for i in range(crates_score.shape[0]):
-                for j in range(crates_score.shape[1]):
-                    if crates_score[i][j] > 0 and distance[i][j] < s.BOMB_TIMER:
-                        crates_score[i][j] *= self.is_safe_to_drop_bomb((i, j))
-            score[index] += np.sum(coins_score + enemy0_score + enemies_score + crates_score)
+            adjusted_distance = distance + 1  # Avoid division by zero
 
-            # escape_positions
-            if danger[x][y] > 0:
-                score[index] += safe[index] * weights['escape']
-        target = [index for index in score.keys() if score[index] == max(score.values())]
-        target = np.random.choice(target)
+            # Calculate individual scores
+            coins_score = weights['coins'] * (coin_map / adjusted_distance)
+            enemy0_score = weights['enemy0'] * (enemy0_map / adjusted_distance)
+            enemies_score = weights['enemies'] * (enemies_map / adjusted_distance)
+            crates_score = weights['crates'] * (crate_map / adjusted_distance)
+
+            # Adjust crates_score based on safety to drop a bomb
+            mask = (crates_score > 0) & (distance < s.BOMB_TIMER)
+            indices = np.argwhere(mask)
+            for i, j in indices:
+                crates_score[i, j] *= int(self.is_safe_to_drop_bomb((i, j)))
+
+            # Sum up the total score
+            total_score = np.sum(coins_score + enemy0_score + enemies_score + crates_score)
+            score[index] += total_score
+
+            # Add escape weight if in danger
+            score[index] += safe[index] * weights['escape']
+
+        # Choose the action with the highest score
+        max_score = max(score.values())
+        best_actions = [idx for idx, val in score.items() if val == max_score]
+        target = np.random.choice(best_actions)
+
+        # Handle the 'wait' action (index 4) and decide whether to drop a bomb
         if target == 4:
-            if crate_map[x][y] > 0 and self.is_safe_to_drop_bomb((x, y)) and has_bomb:
-                target = 5
+            if crate_map[x, y] > 0 and self.is_safe_to_drop_bomb((x, y)) and has_bomb:
+                target = 5  # Drop bomb action
             else:
-                score[4] = -np.inf
+                score[4] = -np.inf  # Exclude 'wait' from consideration
                 if not any(score.values()):
-                    return 4
-                target = [index for index in score.keys() if score[index] == max(score.values())]
-                target = np.random.choice(target)
+                    return 4  # Default to 'wait' if no better options
+                max_score = max(score.values())
+                best_actions = [idx for idx, val in score.items() if val == max_score]
+                target = np.random.choice(best_actions)
+
         return target
+
 
 
     def is_chance_to_kill(self) -> bool:

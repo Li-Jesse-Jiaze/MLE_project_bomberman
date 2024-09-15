@@ -73,7 +73,7 @@ def visualize_moving_averages(scores_data, n):
         plt.plot(range(n, len(avg_winrates) + 1), avg_winrates[n-1:], label=f"{agent}")
     plt.xlabel("Game")
     plt.ylabel("Average Winrate")
-    plt.ylim(0, 1)
+    plt.ylim(-0.1, 1.1)
     plt.legend()
     plt.grid(True)
     plt.show()

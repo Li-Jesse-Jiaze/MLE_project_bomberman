@@ -1,6 +1,6 @@
 import numpy as np
-from collections import deque
-from typing import List, Dict, Tuple
+from collections import deque, defaultdict
+from typing import List, Dict
 import copy
 import settings as s
 
@@ -61,7 +61,9 @@ class Feature:
         )
         danger = self.calculate_danger_map(bombs)
         directions = DIRECTIONS_INCLUDING_WAIT
-        first_step_to_safes = {}
+        first_step_to_safes = defaultdict(list)
+        others_positions = set(other[-1] for other in others)
+        bomb_dict = { (bx, by): timer for (bx, by), timer in bombs }
         q = deque()
         q.append((pos[0], pos[1], 0, None))
         while q:
@@ -70,8 +72,6 @@ class Feature:
                 or explosion_map[x][y] >= steps > 0: # explosion while agent passing by
                 continue
             if steps == max_steps:
-                if first_step not in first_step_to_safes:
-                    first_step_to_safes[first_step] = []
                 if (x, y) not in first_step_to_safes[first_step]:
                     first_step_to_safes[first_step].append((x, y))
                 continue
@@ -80,10 +80,9 @@ class Feature:
                 if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
                     if not (field[nx, ny] == 0 or (field[nx, ny] == 1 and steps > s.BOMB_TIMER - danger[nx][ny] + s.EXPLOSION_TIMER and danger[nx][ny] > 0)):
                         continue
-                    if any((nx, ny) == other[-1] for other in others) and steps == 0:
+                    if (nx, ny) in others_positions and steps == 0:
                         continue
-                    bomb_prevent = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
-                    if bomb_prevent:
+                    if (nx, ny) in bomb_dict and bomb_dict[(nx, ny)] >= steps:
                         continue
                     new_first_step = i if first_step is None else first_step
                     if steps < max_steps:
@@ -206,8 +205,8 @@ class Feature:
         )
         danger = self.calculate_danger_map(bombs)
         directions = [(x+d[0], y+d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
-        weights_with_bomb = {"crates": 1, "coins": 200, "enemy0": 5, "enemies": -1, "escape": 35}
-        weights_without_bomb = {"crates": 1, "coins": 200, "enemy0": -50, "enemies": -50, "escape": 35}
+        weights_with_bomb = {"crates": 1, "coins": 200, "enemy0": 7, "enemies": -1, "escape": 35}
+        weights_without_bomb = {"crates": 1, "coins": 200, "enemy0": -200, "enemies": -50, "escape": 35}
         weights = weights_with_bomb if has_bomb else weights_without_bomb
 
         coin_map = np.zeros_like(field)

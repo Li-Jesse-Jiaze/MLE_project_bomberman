@@ -15,10 +15,6 @@ class Feature:
     bomb_impact_matrix: np.ndarray
     # var
     game_state: Dict
-    features: List[str] = None
-    scores: Dict = {}
-    go_4_coin: bool
-    main_enemy: str = None
 
     def __init__(self) -> None:
         walls = np.zeros((s.COLS, s.ROWS), int)
@@ -47,6 +43,8 @@ class Feature:
                             if walls[nx, ny] == -1:
                                 break
                             self.bomb_impact_matrix[index, nx * s.ROWS + ny] = 1
+        categories = ['crate', 'wall', 'enemy', 'bomb', 'coin', 'free']
+        self.category_to_index = {category: index for index, category in enumerate(categories)}
 
     def calculate_danger_map(self, bombs) -> np.ndarray:
         bomb_map = np.zeros((s.COLS, s.ROWS), int)
@@ -93,7 +91,7 @@ class Feature:
                 safe_position[i] = len(first_step_to_safes[i])
         return safe_position
 
-    def trigger_explosion(position, game_state):
+    def trigger_explosion(self, position, game_state):
         x, y = position
         explosion_range = s.BOMB_POWER
         directions = DIRECTIONS
@@ -140,7 +138,7 @@ class Feature:
 
     def BFS(self, game_state, x, y) -> np.ndarray:
         m, n = game_state['field'].shape
-        distance = np.abs(np.arange(m)[:, None] - x) + np.abs(np.arange(n) - y) + 2 * (s.BOMB_POWER + s.EXPLOSION_TIMER)
+        distance = np.full((m, n), np.inf)
         field, explosion_map, bombs, _, others = (
             game_state['field'], game_state['explosion_map'], game_state['bombs'],
             game_state['coins'], game_state['others']
@@ -190,68 +188,48 @@ class Feature:
 
         return result_matrix
 
-    def calculate_scores(self, safe: List[int], has_bomb: bool) -> int:
-        if sum(safe) == 0:
-            return -1
-        # Predict the next state and extract relevant information
+    def calculate_score_matrix(self, safe: List[int]) -> np.ndarray:
+        score_matrix = np.zeros((5, 5))
+        if not sum(safe):
+            return score_matrix
         next_state = self.predict_next_state()
         field = next_state['field']
-        bombs = next_state['bombs']
         coins = next_state['coins']
         others = next_state['others']
-        x, y = next_state['self'][-1]  # Current position
+        x, y = next_state['self'][-1]  # current pos
 
-        danger = self.calculate_danger_map(bombs)
         directions = [(x + dx, y + dy) for dx, dy in DIRECTIONS_INCLUDING_WAIT]
+        crates_neighbors = self.find_crates_neighbors(field)
+        coin_positions = np.array(coins)
+        enemy_positions = [other[-1] for other in others]
 
-        # Define weights based on safe or not
-        if has_bomb and danger[x, y] <= 0:
-            weights = {"crates": 0, "coins": 300, "enemy0": 30, "enemies": -5, "escape": 0}
-        else:
-            weights = {"crates": 0, "coins": 300, "enemy0": -50, "enemies": -50, "escape": 35}
-        if self.go_4_coin:
-            weights['crates'] = 1
-        # Initialize maps for coins, enemies, and crates
-        coin_map = np.zeros_like(field, dtype=int)
-        if coins:
-            coin_positions = np.array(coins)
-            coin_map[coin_positions[:, 0], coin_positions[:, 1]] = 1
-
-        enemies_map = np.zeros_like(field, dtype=int)
-        other_positions = np.array([other[-1] for other in others])
-        if other_positions.size > 0:
-            enemies_map[other_positions[:, 0], other_positions[:, 1]] = 1
-
-        enemy0_map = np.zeros_like(field, dtype=int)
-        if self.main_enemy:
-            enemy_positions = {other[0]: other[-1] for other in others}
-            enemy0_pos = enemy_positions.get(self.main_enemy)
-            if enemy0_pos:
-                enemy0_map[enemy0_pos[0], enemy0_pos[1]] = 1
-
-        crate_map = self.find_crates_neighbors(field)
-
-        # Initialize scores for actions that are safe
-        scores = {index: np.zeros(4) for index in range(5) if safe[index]}
-
-        # Calculate scores for each possible action
-        for index in scores:
+        for index in range(5):
+            if not safe[index]:
+                continue
             nx, ny = directions[index]
-            distance = self.BFS(next_state, nx, ny)
-            adjusted_distance = distance + 1  # Avoid division by zero
+            distances = self.BFS(next_state, nx, ny) + 1
 
-            # Calculate individual scores
-            coins_distance = np.sum(coin_map / adjusted_distance) / len(coins)
-            enemy0_distance = np.sum(enemy0_map / adjusted_distance)
-            enemies_distance = np.sum(enemies_map / adjusted_distance) / len(others)
-            crates_distance = np.sum(crate_map / adjusted_distance) / np.sum(crate_map > 0)
-            # crates_score[nx, ny] *= self.is_safe_to_drop_bomb((nx, ny))
+            crates_score = crates_neighbors / distances
 
-            # Sum up the total score
-            score = np.array([coins_distance, enemy0_distance, enemies_distance, crates_distance])
-            scores[index] += score
+            # Adjust crates_score based on safety to drop a bomb
+            mask = (crates_score > 0) & (distances < s.BOMB_TIMER)
+            indices = np.argwhere(mask)
+            for i, j in indices:
+                crates_score[i, j] *= int(self.is_safe_to_drop_bomb((i, j)))
+            score_matrix[index, 0] = np.sum(crates_score)
 
-        return scores
+            if coin_positions.size > 0:
+                coin_distances = distances[coin_positions[:, 0], coin_positions[:, 1]]
+                score_matrix[index, 1] = (1 / coin_distances).sum()
+            
+            enemy_score = [0] * 3
+            for enemy_idx, enemy_pos in enumerate(enemy_positions):
+                ex, ey = enemy_pos
+                enemy_distance = distances[ex, ey]
+                enemy_score[enemy_idx] =  1 / enemy_distance
+            score_matrix[index, 2:5] = enemy_score
+
+        return score_matrix
 
     def is_chance_to_kill(self) -> bool:
         state_0 = copy.deepcopy(self.game_state)
@@ -265,65 +243,38 @@ class Feature:
                 return True
         return False
 
-    def find_main_enemy(self):
-        if len(self.game_state['others']):
-            return min(
-                self.game_state['others'],
-                key=lambda other: abs(self.game_state['self'][-1][0] - other[-1][0]) + abs(self.game_state['self'][-1][1] - other[-1][1])
-            )[0]
-        return None
-
     def __call__(self, game_state: Dict) -> List[str]:
         self.game_state = game_state
-        self.scores[game_state['self'][0]] = game_state['self'][1]
-        for o in game_state['others']:
-            self.scores[o[0]] = o[1]
-        self.go_4_coin = (not len(game_state['others'])) or (sum(self.scores.values()) < 9)
-        if len(game_state['others']):
-            if self.main_enemy not in [o[0] for o in game_state['others']] or game_state['step'] % 30 == 0:
-                self.main_enemy = self.find_main_enemy()
-        else:
-            self.main_enemy = None
         # Calculate feature list [up, right, down, left, center, bomb]
         # Step 1: Init what is in feature
         if game_state is None:
             return None
         
-        field, explosion_map, bombs, coins, others, (x, y) = (
-            game_state['field'], game_state['explosion_map'], game_state['bombs'],
+        field, bombs, coins, others, (x, y) = (
+            game_state['field'], game_state['bombs'],
             game_state['coins'], game_state['others'], game_state['self'][-1]
         )
 
-        self.features = []
-        directions = [(x + dx, y + dy) for dx, dy in DIRECTIONS_INCLUDING_WAIT] # UP, RIGHT, DOWN, LEFT, WAIT
-        field_labels = {1: 'block', -1: 'block', 0: 'free'}
-        
-        for i, j in directions:
+        field_labels = {1: 'crate', -1: 'wall', 0: 'free'}
+        directions = [(x + d[0], y + d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
+        features = np.zeros((5, 6))
+        for index, (i, j) in enumerate(directions):
             tile = field_labels[field[i, j]]
-            if tile == 'free':
-                if explosion_map[i, j] > 0:
-                    tile = 'dead'
-                elif any(op[-1] == (i, j) for op in others):
-                    tile = 'enemy'
-                elif any((b[0] == i and b[1] == j) for b, _ in bombs):
-                    tile = 'block'
-                elif any((coin[0] == i and coin[1] == j) for coin in coins):
-                    tile = 'coin'
-            self.features.append(tile)
-        self.features.append(str(self.game_state['self'][2]))
-        # Step 2: Find safe actions: List(Bool)
+            if any(op[-1] == (i, j) for op in others):
+                tile = 'enemy'
+            elif any((b[0] == i and b[1] == j) for b, _ in bombs):
+                tile = 'bomb'
+            elif any((coin[0] == i and coin[1] == j) for coin in coins):
+                tile = 'coin'
+            one_hot = np.zeros(6)
+            one_hot[self.category_to_index[tile]] = 1
+            # print(one_hot)
+            features[index] = one_hot
+
         safe = self.find_safe_position(self.game_state)
-        for i in range(len(safe)):
-            if safe[i] == 0 and self.features[i] in ['coin', 'free']:
-                self.features[i] = 'dead'
-        if not self.is_safe_to_drop_bomb((x, y)):
-            self.features[-1] = 'dead'
-        # safe.append(self.is_safe_to_drop_bomb(self.game_state['self'][-1]))
-        # Step 3: Figure 'target' if feature[i] is free and safe
-            # Step 3.1: Check if is a chance to attack
-        target = self.calculate_scores(safe, self.game_state['self'][2])
-        if target >= 0:
-            self.features[target] = 'target'
-        if self.is_chance_to_kill() and self.features[-1] != 'dead':
-            self.features[-1] = 'KILL!'
-        return self.features
+        score_matrix = self.calculate_score_matrix(safe)
+        score_and_safe = np.hstack((score_matrix, np.array([safe]).T))
+        features = np.hstack((features[:, :-1], score_and_safe))
+        bomb_valid = int(self.is_safe_to_drop_bomb((x, y)) and game_state['self'][2])
+        kill = int(self.is_chance_to_kill())
+        return features, bomb_valid, kill

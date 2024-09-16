@@ -22,7 +22,7 @@ def setup_training(self):
     """
     self.epsilon = 0.5
     self.epsilon_min = 0.1
-    self.epsilon_decay = 0.999
+    self.epsilon_decay = 0.9995
     self.gamma = 0.6
     self.alpha = 0.1
     self.q_table = Table()

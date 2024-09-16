@@ -16,7 +16,8 @@ class Feature:
     # var
     game_state: Dict
     features: List[str] = None
-
+    scores: Dict = {}
+    go_4_coin: bool
     main_enemy: str = None
 
     def __init__(self) -> None:
@@ -133,17 +134,12 @@ class Feature:
         explosion_map -= (explosion_map > 0).astype(int)
         return next_state
 
-    def is_safe_to_drop_bomb(self, pos) -> bool:
+    def is_safe_to_drop_bomb(self, pos):
         next_state = self.predict_next_state(pos)
         safe_positions = self.find_safe_position(next_state)
-        return sum(1 for s in safe_positions if s != 0)
-        # if sum(safe_positions) == 0:
-        #     return False
-        # return True
+        return any(safe_positions)
 
     def BFS(self, game_state, x, y) -> np.ndarray:
-        # distance = np.full(game_state['field'].shape, np.inf)
-        # Consider unreachable coins and others
         m, n = game_state['field'].shape
         distance = np.abs(np.arange(m)[:, None] - x) + np.abs(np.arange(n) - y) + 2 * (s.BOMB_POWER + s.EXPLOSION_TIMER)
         field, explosion_map, bombs, _, others = (
@@ -164,23 +160,23 @@ class Feature:
         else:
             max_wait_steps = explosion_map.max() + 1
         
+        other_positions = set(other[-1] for other in others)
+        bomb_positions = {(bx, by): timer for (bx, by), timer in bombs}
         # BFS
         while q:
             x, y, steps = q.popleft()
-            if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] < steps <= s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) \
-                or explosion_map[x][y] >= steps > 0: # explosion while agent passing by
+            if (danger[x][y] > 0 and s.BOMB_TIMER - danger[x][y] < steps <= s.BOMB_TIMER - danger[x][y] + s.EXPLOSION_TIMER) or explosion_map[x][y] >= steps > 0: # explosion while agent passing by
                 continue
             distance[x][y] = min(distance[x][y], steps)
             for dx, dy in directions:
                 nx, ny = x + dx, y + dy
-                if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1] and \
-                    not (steps >= max_wait_steps and (nx, ny) in visited):
+                if 0 <= nx < m and 0 <= ny < n and not (steps >= max_wait_steps and (nx, ny) in visited):
                     if not (field[nx, ny] == 0 or (field[nx, ny] == 1 and steps > s.BOMB_TIMER - danger[nx][ny] + s.EXPLOSION_TIMER and danger[nx][ny] > 0)):
                         continue
-                    if any((nx, ny) == other[-1] for other in others) and steps == 0:
+                    if (nx, ny) in other_positions and steps == 0:
                         continue
-                    bomb_prevent = any((nx, ny) == (bx, by) and timer >= steps for (bx, by), timer in bombs)
-                    if bomb_prevent:
+                    bomb_timer = bomb_positions.get((nx, ny))
+                    if bomb_timer is not None and bomb_timer >= steps:
                         continue
                     visited.add((nx, ny))
                     q.append((nx, ny, steps + 1))
@@ -211,22 +207,23 @@ class Feature:
 
         # Define weights based on safe or not
         if has_bomb and danger[x, y] <= 0:
-            weights = {"crates": 1, "coins": 200, "enemy0": 20, "enemies": -4, "escape": 0}
+            weights = {"crates": 0, "coins": 300, "enemy0": 30, "enemies": -5, "escape": 0}
         else:
-            weights = {"crates": 1, "coins": 200, "enemy0": -50, "enemies": -50, "escape": 35}
-
+            weights = {"crates": 0, "coins": 300, "enemy0": -50, "enemies": -50, "escape": 35}
+        if self.go_4_coin:
+            weights['crates'] = 1
         # Initialize maps for coins, enemies, and crates
-        coin_map = np.zeros_like(field, dtype=float)
+        coin_map = np.zeros_like(field, dtype=int)
         if coins:
             coin_positions = np.array(coins)
             coin_map[coin_positions[:, 0], coin_positions[:, 1]] = 1
 
-        enemies_map = np.zeros_like(field, dtype=float)
+        enemies_map = np.zeros_like(field, dtype=int)
         other_positions = np.array([other[-1] for other in others])
         if other_positions.size > 0:
             enemies_map[other_positions[:, 0], other_positions[:, 1]] = 1
 
-        enemy0_map = np.zeros_like(field, dtype=float)
+        enemy0_map = np.zeros_like(field, dtype=int)
         if self.main_enemy:
             enemy_positions = {other[0]: other[-1] for other in others}
             enemy0_pos = enemy_positions.get(self.main_enemy)
@@ -249,12 +246,7 @@ class Feature:
             enemy0_score = weights['enemy0'] * (enemy0_map / adjusted_distance)
             enemies_score = weights['enemies'] * (enemies_map / adjusted_distance)
             crates_score = weights['crates'] * (crate_map / adjusted_distance)
-
-            # Adjust crates_score based on safety to drop a bomb
-            mask = (crates_score > 0) & (distance < s.BOMB_TIMER)
-            indices = np.argwhere(mask)
-            for i, j in indices:
-                crates_score[i, j] *= int(self.is_safe_to_drop_bomb((i, j)))
+            crates_score[nx, ny] *= self.is_safe_to_drop_bomb((nx, ny))
 
             # Sum up the total score
             total_score = np.sum(coins_score + enemy0_score + enemies_score + crates_score)
@@ -306,6 +298,10 @@ class Feature:
 
     def __call__(self, game_state: Dict) -> List[str]:
         self.game_state = game_state
+        self.scores[game_state['self'][0]] = game_state['self'][1]
+        for o in game_state['others']:
+            self.scores[o[0]] = o[1]
+        self.go_4_coin = (not len(game_state['others'])) or (sum(self.scores.values()) < 9)
         if len(game_state['others']):
             if self.main_enemy not in [o[0] for o in game_state['others']] or game_state['step'] % 30 == 0:
                 self.main_enemy = self.find_main_enemy()

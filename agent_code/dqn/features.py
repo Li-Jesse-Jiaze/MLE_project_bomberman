@@ -257,7 +257,7 @@ class Feature:
 
         field_labels = {1: 'crate', -1: 'wall', 0: 'free'}
         directions = [(x + d[0], y + d[1]) for d in DIRECTIONS_INCLUDING_WAIT]
-        features = np.zeros((5, 6))
+        matrix = np.zeros((5, 6), dtype=np.float32)
         for index, (i, j) in enumerate(directions):
             tile = field_labels[field[i, j]]
             if any(op[-1] == (i, j) for op in others):
@@ -269,12 +269,13 @@ class Feature:
             one_hot = np.zeros(6)
             one_hot[self.category_to_index[tile]] = 1
             # print(one_hot)
-            features[index] = one_hot
+            matrix[index] = one_hot
 
         safe = self.find_safe_position(self.game_state)
         score_matrix = self.calculate_score_matrix(safe)
         score_and_safe = np.hstack((score_matrix, np.array([safe]).T))
-        features = np.hstack((features[:, :-1], score_and_safe))
-        bomb_valid = int(self.is_safe_to_drop_bomb((x, y)) and game_state['self'][2])
-        kill = int(self.is_chance_to_kill())
-        return features, bomb_valid, kill
+        matrix_flat = np.hstack((matrix[:, :-1], score_and_safe)).flatten()
+        bomb_valid = self.is_safe_to_drop_bomb((x, y)) and game_state['self'][2]
+        kill = self.is_chance_to_kill()
+        features = np.concatenate((matrix_flat, [bomb_valid, kill]))
+        return features

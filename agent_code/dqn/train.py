@@ -30,14 +30,14 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.epsilon = 1.0
+    self.epsilon = 0.5
     self.epsilon_min = 0.1
     self.epsilon_decay = 0.995
     self.gamma = 0.9
-    self.batch_size = 256
+    self.batch_size = 64
     self.memory = deque(maxlen=10000)
     self.steps_done = 0
-    self.update_target_steps = 100  # How often to update the target network
+    self.update_target_steps = 1000  # How often to update the target network
 
     input_dim = 57 # 5 * 11 + 2
     output_dim = len(ACTIONS)
@@ -51,7 +51,7 @@ def setup_training(self):
     self.target_net.eval()
 
     self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-3)
-    self.loss_fn = nn.SmoothL1Loss()
+    self.loss_fn = nn.MSELoss()
 
 
 def store_symmetric_transitions(self, state, action, reward, next_state, done):
@@ -188,6 +188,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
     features_old = self.feature(last_game_state)
     features_new = None
+
     # Add events
     matrix_flat, (bomb_valid, kill) = features_old[:-2], features_old[-2:]
     matrix = matrix_flat.reshape((5, -1))
@@ -207,14 +208,16 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         if s_free_5[-1] > 0:
             events.append(ATTACK_CTARES)
     else:
-        if not s_safe_5[ACTIONS.index(last_action)]:
+        action_index = ACTIONS.index(last_action)
+        if not s_safe_5[action_index]:
             events.append(MOVE_TO_DEAD)
-        if s_free_5[ACTIONS.index(last_action)] == max(s_free_5) and max(s_free_5) > 0:
+        if s_free_5[action_index] == max(s_free_5) and max(s_free_5) > 0:
             events.append(MOVE_TO_CRATES)
-        if s_coin_5[ACTIONS.index(last_action)] == max(s_coin_5) and max(s_coin_5) > 0:
+        if s_coin_5[action_index] == max(s_coin_5) and max(s_coin_5) > 0:
             events.append(MOVE_TO_COINS)
-        if check_row(s_enemy_5_3, ACTIONS.index(last_action)):
+        if check_row(s_enemy_5_3, action_index):
             events.append(MOVE_TO_1V1)
+
     reward = reward_from_events(self, events)
     done = True
 
@@ -239,21 +242,19 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_RIGHT: -1,
         e.MOVED_UP: -1,
         e.MOVED_DOWN: -1,
-        e.WAITED: -5,
-        e.BOMB_DROPPED: -5,
-        e.INVALID_ACTION: -10,
-        e.COIN_COLLECTED: 20,
-        e.KILLED_OPPONENT: 5,
+        e.WAITED: -20,
+        e.BOMB_DROPPED: -30,
+        e.COIN_COLLECTED: 200,
         e.KILLED_SELF: -30,
         e.GOT_KILLED: -10,
-        MOVE_TO_DEAD: -50,
-        MOVE_TO_1V1: 2,
-        MOVE_TO_COINS: 20,
-        MOVE_TO_CRATES: 1,
-        BOMB_TO_DEAD: -50,
-        ATTACK_CTARES: 5,
-        ATTACK_ENEMY: 2,
-        KILL_ENEMY: 50,
+        MOVE_TO_DEAD: -200,
+        MOVE_TO_1V1: 200,
+        MOVE_TO_COINS: 400,
+        MOVE_TO_CRATES: 50,
+        BOMB_TO_DEAD: -500,
+        ATTACK_CTARES: 300,
+        ATTACK_ENEMY: 100,
+        KILL_ENEMY: 1000,
     }
     reward_sum = 0
     for event in events:

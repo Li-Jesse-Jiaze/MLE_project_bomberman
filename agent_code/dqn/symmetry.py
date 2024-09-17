@@ -43,8 +43,8 @@ def adjust_features(features, rotation=0, flip_horizontal=False, flip_vertical=F
         directions[0], directions[2] = directions[2], directions[0]
 
     new_matrix = np.empty_like(matrix)
-    for i, dir in enumerate(directions):
-        new_matrix[i] = features[direction_index[dir]]
+    for i, direct in enumerate(directions):
+        new_matrix[i] = features[direction_index[direct]]
     new_matrix[4] = features[direction_index['CENTER']]
 
     return np.concatenate((new_matrix.flatten(), bombs))

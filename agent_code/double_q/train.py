@@ -22,9 +22,9 @@ def setup_training(self):
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     self.epsilon = 0.5
-    self.epsilon_min = 0.01
+    self.epsilon_min = 0.1
     self.epsilon_decay = 0.999
-    self.gamma = 0.9
+    self.gamma = 0.6
     self.alpha = 0.1
     self.q_table_1 = Table()
     self.q_table_2 = Table()

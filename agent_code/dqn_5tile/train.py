@@ -8,17 +8,14 @@ import torch.nn as nn
 import torch.optim as optim
 
 import events as e
-from .callbacks import ACTIONS
-from .symmetry import adjust_action, adjust_features
+from .callbacks import ACTIONS, encode_feature
+from .symmetry import adjust_action, adjust_state
 from .model import DQN
 
 # Events
 MOVE_TO_DEAD = "MOVE_TO_DEAD"
-MOVE_TO_1V1 = "MOVE_TO_1V1"
-MOVE_TO_COINS = "MOVE_TO_COINS"
-MOVE_TO_CRATES = "MOVE_TO_CRATES"
-BOMB_TO_DEAD = "BOMB_TO_DEAD"
-ATTACK_CTARES = "ATTACK_CTARES"
+MOVE_TO_TARGET = "MOVE_TO_TARGET"
+ATTACK_TARGET = "ATTACK_TARGET"
 ATTACK_ENEMY = "ATTACK_ENEMY"
 KILL_ENEMY = "KILL_ENEMY"
 
@@ -39,7 +36,7 @@ def setup_training(self):
     self.steps_done = 0
     self.update_target_steps = 1000  # How often to update the target network
 
-    input_dim = 57 # 5 * 11 + 2
+    input_dim = 34 # 5 * 6 + 4
     output_dim = len(ACTIONS)
     try:
         with open("my-saved-model.pt", "rb") as file:
@@ -59,12 +56,12 @@ def store_symmetric_transitions(self, state, action, reward, next_state, done):
     flips = [(False, False), (True, False), (False, True)]
     for rotation in rotations:
         for flip_horizontal, flip_vertical in flips:
-            adjusted_state = adjust_features(state, rotation, flip_horizontal, flip_vertical)
+            adjusted_state = adjust_state(state, rotation, flip_horizontal, flip_vertical)
             adjusted_action = adjust_action(action, rotation, flip_horizontal, flip_vertical)
-            adjusted_next_state = [0] * 57 if next_state is None else adjust_features(next_state, rotation, flip_horizontal, flip_vertical)
+            adjusted_next_state = [] if next_state is None else adjust_state(next_state, rotation, flip_horizontal, flip_vertical)
             adjusted_action_index = ACTIONS.index(adjusted_action)
             
-            self.memory.append((torch.tensor(adjusted_state, dtype=torch.float32), adjusted_action_index, reward, torch.tensor(adjusted_next_state, dtype=torch.float32), done))
+            self.memory.append((torch.tensor(encode_feature(adjusted_state), dtype=torch.float32), adjusted_action_index, reward, torch.tensor(encode_feature(adjusted_next_state), dtype=torch.float32), done))
 
 
 def sample_batch(self):
@@ -134,42 +131,24 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
-    features_old = self.feature(old_game_state)
-    features_new = self.feature(new_game_state) if new_game_state else None
+    old_feature = self.feature(old_game_state)
+    new_feature = self.feature(new_game_state) if new_game_state else None
 
-    # Add events
-    matrix_flat, (bomb_valid, kill) = features_old[:-2], features_old[-2:]
-    matrix = matrix_flat.reshape((5, -1))
-    # matrix col: [crate, wall, enemy, bomb, coin, s_free, s_coin, s_e0, s_e1, s_e2, safe]
-    enemy_5 = matrix[:, 2]
-    s_free_5 = matrix[:, 5]
-    s_coin_5 = matrix[:, 6]
-    s_safe_5 = matrix[:, -1]
-    s_enemy_5_3 = matrix[:, 7:10]
+    if old_feature[ACTIONS.index(self_action)] == "target":
+        events.append(MOVE_TO_TARGET)
+    if old_feature[ACTIONS.index(self_action)] == "dead":
+        events.append(MOVE_TO_DEAD)
     if self_action == 'BOMB':
-        if not bomb_valid:
-            events.append(BOMB_TO_DEAD)
-        else:
-            if any(enemy_5):
-                events.append(ATTACK_ENEMY)
-            if kill:
-                events.append(KILL_ENEMY)
-            if s_free_5[-1] == max(s_free_5) and max(s_free_5) > 0:
-                events.append(ATTACK_CTARES)
-    else:
-        action_index = ACTIONS.index(self_action)
-        if not s_safe_5[action_index]:
-            events.append(MOVE_TO_DEAD)
-        if s_free_5[action_index] == max(s_free_5) and max(s_free_5) > 0:
-            events.append(MOVE_TO_CRATES)
-        if s_coin_5[action_index] == max(s_coin_5) and max(s_coin_5) > 0:
-            events.append(MOVE_TO_COINS)
-        if check_row(s_enemy_5_3, action_index):
-            events.append(MOVE_TO_1V1)
+        if 'enemy' in old_feature:
+            events.append(ATTACK_ENEMY)
+        if old_feature[-1] == 'target':
+            events.append(ATTACK_TARGET)
+        if old_feature[-1] == 'KILL!':
+            events.append(KILL_ENEMY)
     
     reward = reward_from_events(self, events)
     done = False if new_game_state else True
-    store_symmetric_transitions(self, features_old, self_action, reward, features_new, done)
+    store_symmetric_transitions(self, old_feature, self_action, reward, new_feature, done)
     optimize_model(self)
     
 
@@ -187,42 +166,25 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    features_old = self.feature(last_game_state)
-    features_new = None
+    old_feature = self.feature(last_game_state)
+    new_feature = None
 
-    # Add events
-    matrix_flat, (bomb_valid, kill) = features_old[:-2], features_old[-2:]
-    matrix = matrix_flat.reshape((5, -1))
-    # matrix col: [crate, wall, enemy, bomb, coin, s_free, s_coin, s_e0, s_e1, s_e2, safe]
-    enemy_5 = matrix[:, 2]
-    s_free_5 = matrix[:, 5]
-    s_coin_5 = matrix[:, 6]
-    s_safe_5 = matrix[:, -1]
-    s_enemy_5_3 = matrix[:, 7:10]
+    if old_feature[ACTIONS.index(last_action)] == "target":
+        events.append(MOVE_TO_TARGET)
+    if old_feature[ACTIONS.index(last_action)] == "dead":
+        events.append(MOVE_TO_DEAD)
     if last_action == 'BOMB':
-        if not bomb_valid:
-            events.append(BOMB_TO_DEAD)
-        if any(enemy_5):
+        if 'enemy' in old_feature:
             events.append(ATTACK_ENEMY)
-        if kill:
+        if old_feature[-1] == 'target':
+            events.append(ATTACK_TARGET)
+        if old_feature[-1] == 'KILL!':
             events.append(KILL_ENEMY)
-        if s_free_5[-1] > 0:
-            events.append(ATTACK_CTARES)
-    else:
-        action_index = ACTIONS.index(last_action)
-        if not s_safe_5[action_index]:
-            events.append(MOVE_TO_DEAD)
-        if s_free_5[action_index] == max(s_free_5) and max(s_free_5) > 0:
-            events.append(MOVE_TO_CRATES)
-        if s_coin_5[action_index] == max(s_coin_5) and max(s_coin_5) > 0:
-            events.append(MOVE_TO_COINS)
-        if check_row(s_enemy_5_3, action_index):
-            events.append(MOVE_TO_1V1)
 
     reward = reward_from_events(self, events)
     done = True
 
-    store_symmetric_transitions(self, features_old, last_action, reward, features_new, done)
+    store_symmetric_transitions(self, old_feature, last_action, reward, new_feature, done)
 
     optimize_model(self)
 
@@ -246,19 +208,18 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_RIGHT: -1,
         e.MOVED_UP: -1,
         e.MOVED_DOWN: -1,
-        e.WAITED: -20,
-        e.BOMB_DROPPED: -30,
-        e.COIN_COLLECTED: 200,
-        e.KILLED_SELF: -30,
-        e.GOT_KILLED: -10,
-        MOVE_TO_DEAD: -200,
-        MOVE_TO_1V1: 200,
-        MOVE_TO_COINS: 400,
-        MOVE_TO_CRATES: 50,
-        BOMB_TO_DEAD: -500,
-        ATTACK_CTARES: 300,
-        ATTACK_ENEMY: 100,
-        KILL_ENEMY: 1000,
+        e.WAITED: -5,
+        e.BOMB_DROPPED: -5,
+        e.INVALID_ACTION: -20,
+        e.COIN_COLLECTED: 10,
+        e.KILLED_OPPONENT: 50,
+        e.KILLED_SELF: -300,
+        e.GOT_KILLED: -100.,
+        MOVE_TO_DEAD: -100,
+        MOVE_TO_TARGET: 50,
+        ATTACK_TARGET: 50,
+        ATTACK_ENEMY: 20,
+        KILL_ENEMY: 500,
     }
     reward_sum = 0
     for event in events:

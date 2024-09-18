@@ -32,7 +32,7 @@ def setup_training(self):
     """
     self.epsilon = 0.5
     self.epsilon_min = 0.1
-    self.epsilon_decay = 0.995
+    self.epsilon_decay = 0.9995
     self.gamma = 0.9
     self.batch_size = 64
     self.memory = deque(maxlen=10000)

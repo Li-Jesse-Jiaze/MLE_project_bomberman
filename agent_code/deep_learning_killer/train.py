@@ -1,17 +1,16 @@
 from typing import List
 
 import events as e
-from .features import state_to_features
 from .callbacks import feat2str, choose_action, ACTIONS
 from .table import Table
 from .symmetry import adjust_action, adjust_state
 
 # Events
+MOVE_TO_DEAD = "MOVE_TO_DEAD"
 MOVE_TO_TARGET = "MOVE_TO_TARGET"
-MOVE_TO_DANGER = "MOVE_TO_DANGER"
-ATTACK_CRATE = "ATTACK_CRATE"
+ATTACK_TARGET = "ATTACK_TARGET"
 ATTACK_ENEMY = "ATTACK_ENEMY"
-ILLEGAL_BOMB = "ILLEGAL_BOMB"
+KILL_ENEMY = "KILL_ENEMY"
 
 def setup_training(self):
     """
@@ -21,8 +20,8 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.epsilon = 0.5
-    self.epsilon_min = 0.01
+    self.epsilon = 1.0
+    self.epsilon_min = 0.1
     self.epsilon_decay = 0.999
     self.gamma = 0.9
     self.alpha = 0.1
@@ -79,20 +78,20 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
-    old_feature = state_to_features(old_game_state)
-    new_feature = state_to_features(new_game_state)
+    old_feature = self.feature(old_game_state)
+    new_feature = self.feature(new_game_state)
     # Idea: Add your own events to hand out rewards
     if old_feature[ACTIONS.index(self_action)] == "target":
         events.append(MOVE_TO_TARGET)
-    if old_feature[ACTIONS.index(self_action)] == "danger" or old_feature[ACTIONS.index(self_action)] == 'bomb':
-        events.append(MOVE_TO_DANGER)
+    if old_feature[ACTIONS.index(self_action)] == "dead":
+        events.append(MOVE_TO_DEAD)
     if self_action == 'BOMB':
-        if not eval(old_feature[-3]):
-            events.append(ILLEGAL_BOMB)
-        elif eval(old_feature[-2]):
-            events.append(ATTACK_CRATE)
-        elif eval(old_feature[-1]):
+        if 'enemy' in old_feature:
             events.append(ATTACK_ENEMY)
+        if old_feature[-1] == 'target':
+            events.append(ATTACK_TARGET)
+        if old_feature[-1] == 'KILL!':
+            events.append(KILL_ENEMY)
 
     reward = reward_from_events(self, events)
 
@@ -115,7 +114,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
-    old_feature = state_to_features(last_game_state)
+    old_feature = self.feature(last_game_state)
     new_feature = []
     reward = reward_from_events(self, events)
 
@@ -142,17 +141,17 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_UP: -1,
         e.MOVED_DOWN: -1,
         e.WAITED: -5,
-        e.BOMB_DROPPED: -10,
-        e.INVALID_ACTION: -100,
-        e.COIN_COLLECTED: 100,
-        e.KILLED_OPPONENT: 100.,
-        e.KILLED_SELF: -300.,
+        e.BOMB_DROPPED: -5,
+        e.INVALID_ACTION: -20,
+        e.COIN_COLLECTED: 10,
+        e.KILLED_OPPONENT: 50,
+        e.KILLED_SELF: -300,
         e.GOT_KILLED: -100.,
+        MOVE_TO_DEAD: -100,
         MOVE_TO_TARGET: 50,
-        MOVE_TO_DANGER: -60,
-        ATTACK_CRATE: 40,
-        ATTACK_ENEMY: 80,
-        ILLEGAL_BOMB: -500,
+        ATTACK_TARGET: 50,
+        ATTACK_ENEMY: 20,
+        KILL_ENEMY: 500,
     }
     reward_sum = 0
     for event in events:

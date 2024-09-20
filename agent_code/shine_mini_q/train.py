@@ -17,6 +17,7 @@ MOVE_TO_DEAD = "MOVE_TO_DEAD"
 MOVE_TO_1V1 = "MOVE_TO_1V1"
 MOVE_TO_COINS = "MOVE_TO_COINS"
 MOVE_TO_CRATES = "MOVE_TO_CRATES"
+JUSTIFIED_WAIT = "JUSTIFIED_WAIT"
 BOMB_TO_DEAD = "BOMB_TO_DEAD"
 ATTACK_CTARES = "ATTACK_CTARES"
 ATTACK_ENEMY = "ATTACK_ENEMY"
@@ -206,8 +207,11 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
             events.append(ATTACK_ENEMY)
         if kill:
             events.append(KILL_ENEMY)
-        if s_free_5[-1] > 0:
+        if s_free_5[-1] == max(s_free_5) and max(s_free_5) > 0:
             events.append(ATTACK_CTARES)
+    elif last_action == 'WAIT':
+        if s_safe_5[-1] > 0 and not any(s_safe_5[:-1]):
+            events.append(JUSTIFIED_WAIT)
     else:
         action_index = ACTIONS.index(last_action)
         if not s_safe_5[action_index]:
@@ -246,15 +250,16 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_RIGHT: -1,
         e.MOVED_UP: -1,
         e.MOVED_DOWN: -1,
-        e.WAITED: -20,
+        e.WAITED: -50,
         e.BOMB_DROPPED: -30,
         e.COIN_COLLECTED: 200,
         e.KILLED_SELF: -30,
         e.GOT_KILLED: -10,
         MOVE_TO_DEAD: -200,
-        MOVE_TO_1V1: 200,
+        MOVE_TO_1V1: 100,
         MOVE_TO_COINS: 400,
-        MOVE_TO_CRATES: 50,
+        MOVE_TO_CRATES: 100,
+        JUSTIFIED_WAIT: 200,
         BOMB_TO_DEAD: -500,
         ATTACK_CTARES: 300,
         ATTACK_ENEMY: 100,

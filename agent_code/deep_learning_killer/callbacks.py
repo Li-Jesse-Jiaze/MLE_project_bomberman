@@ -54,16 +54,6 @@ def choose_action(self, feature: List[str]) -> str:
         return best_action
 
 
-# def choose_action(self, feature: List[str]) -> str:
-#     if 'KILL!' in feature:
-#         return 'BOMB'
-#     elif 'target' in feature:
-#         return ACTIONS[feature.index('target')]
-#     else:
-#         return np.random.choice(ACTIONS, p=[0.2, 0.2, 0.2, 0.2, 0.1, 0.1])
-
-
-
 def act(self, game_state: dict) -> str:
     """
     Your agent should parse the input, think, and take a decision.

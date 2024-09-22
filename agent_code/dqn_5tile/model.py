@@ -33,8 +33,11 @@ class DQN(nn.Module):
 
     def forward(self, x):
         features = self.feature_layer(x)
+        
+        # Compute value and advantage
         value = self.value_stream(features)
         advantage = self.advantage_stream(features)
-
+        
+        # Combine value and advantage to get Q-values
         q_vals = value + advantage - advantage.mean(dim=1, keepdim=True)
         return q_vals

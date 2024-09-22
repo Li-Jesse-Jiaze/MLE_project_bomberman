@@ -6,6 +6,31 @@ from .features import Feature
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
+def encode_feature(features):
+    if features is None or len(features) == 0:
+        return [0] * 34
+    mapping_0_4 = {'block': 0, 'free': 1, 'dead': 2, 'coin': 3, 'enemy': 4, 'target': 5}
+    mapping_5 = {'True': 0, 'False': 1, 'target': 2, 'KILL!': 3}
+    
+    onehot_vector = []
+    
+    for i in range(5):
+        onehot = [0] * 6
+        value = features[i]
+        if value in mapping_0_4:
+            idx = mapping_0_4[value]
+            onehot[idx] = 1
+        onehot_vector.extend(onehot)
+    
+    onehot = [0] * 4
+    value = features[5]
+    if value in mapping_5:
+        idx = mapping_5[value]
+        onehot[idx] = 1
+    onehot_vector.extend(onehot)
+    
+    return onehot_vector
+
 
 def setup(self):
     """
@@ -40,7 +65,7 @@ def act(self, game_state: dict) -> str:
     """
     features = self.feature(game_state)
 
-    features_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
+    features_tensor = torch.tensor(encode_feature(features), dtype=torch.float32).unsqueeze(0).to(self.device)
     if self.train:
         if random.random() > self.epsilon:
             with torch.no_grad():

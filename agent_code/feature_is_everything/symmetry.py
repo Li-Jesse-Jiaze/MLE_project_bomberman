@@ -1,5 +1,3 @@
-import numpy as np
-
 ROTATION_MAPPING = {
     0: {'UP': 'UP', 'RIGHT': 'RIGHT', 'DOWN': 'DOWN', 'LEFT': 'LEFT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
     90: {'UP': 'RIGHT', 'RIGHT': 'DOWN', 'DOWN': 'LEFT', 'LEFT': 'UP', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
@@ -23,28 +21,30 @@ def adjust_action(action, rotation=0, flip_horizontal=False, flip_vertical=False
     return action
 
 
-def adjust_features(features, rotation=0, flip_horizontal=False, flip_vertical=False):
-    if features is None or features.size == 0:
-        return features
-    
-    matrix_flat, bombs = features[:-2], features[-2:]
-    matrix = matrix_flat.reshape((5, -1))
+def adjust_state(state, rotation=0, flip_horizontal=False, flip_vertical=False):
+    if not len(state):
+        return state
 
-    direction_index = {'UP': 0, 'RIGHT': 1, 'DOWN': 2, 'LEFT': 3, 'CENTER': 4}
-    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+    direction_index = {'UP': 0, 'RIGHT': 1, 'DOWN': 2, 'LEFT': 3}
+    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']  # Define the initial order of directions before rotation
 
-    rotation = (rotation // 90) % 4
-    directions = directions[-rotation:] + directions[:-rotation]
+    # Normalize and apply clockwise rotation
+    rotation = (rotation // 90) % 4  # Normalize the rotation to one of 0, 1, 2, or 3
+    directions = directions[-rotation:] + directions[:-rotation]  # Rotate the list using slicing
 
+    # Handle horizontal flip
     if flip_horizontal:
-        directions[1], directions[3] = directions[3], directions[1]
+        directions[1], directions[3] = directions[3], directions[1]  # Swap 'RIGHT' and 'LEFT'
 
+    # Handle vertical flip
     if flip_vertical:
-        directions[0], directions[2] = directions[2], directions[0]
+        directions[0], directions[2] = directions[2], directions[0]  # Swap 'UP' and 'DOWN'
 
-    new_matrix = np.empty_like(matrix)
-    for i, direct in enumerate(directions):
-        new_matrix[i, :] = matrix[direction_index[direct], :]
-    new_matrix[4, :] = matrix[direction_index['CENTER'], :]
+    # Update the state according to the new direction list
+    new_state = [0] * 6
+    for i, dir in enumerate(directions):
+        new_state[i] = state[direction_index[dir]]
+    new_state[4] = state[4]  # 'CENTER' remains unchanged
+    new_state[5] = state[5]  # 'BOMBS_LEFT' remains unchanged
 
-    return np.concatenate((new_matrix.flatten(), bombs))
+    return new_state

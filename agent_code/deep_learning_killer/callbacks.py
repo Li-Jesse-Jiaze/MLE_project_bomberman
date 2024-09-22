@@ -34,33 +34,33 @@ def setup(self):
     self.feature = Feature()
 
 
-# def choose_action(self, feature: List[str]) -> str:
-#     feature_str = feat2str(feature)
-#     # Find best action
-#     Q = np.array(self.q_table[feature_str])
-#     best_choice = np.where(Q == max(Q))[0]
-#     best_action = ACTIONS[np.random.choice(best_choice)]
-#     # todo Exploration vs exploitation
-#     if self.train:
-#         if random.random() < self.epsilon:
-#             self.logger.debug("Choosing action purely at random.")
-#             # 80%: walk in any direction. 10% wait. 10% bomb.
-#             return np.random.choice(ACTIONS, p=[0.2, 0.2, 0.2, 0.2, 0.1, 0.1])
-#         else:
-#             self.logger.debug(f"Querying model for action.:{best_action}")
-#             return best_action
-#     else:
-#         self.logger.debug(f"Querying model for action.:{best_action}")
-#         return best_action
-
-
 def choose_action(self, feature: List[str]) -> str:
-    if 'KILL!' in feature:
-        return 'BOMB'
-    elif 'target' in feature:
-        return ACTIONS[feature.index('target')]
+    feature_str = feat2str(feature)
+    # Find best action
+    Q = np.array(self.q_table[feature_str])
+    best_choice = np.where(Q == max(Q))[0]
+    best_action = ACTIONS[np.random.choice(best_choice)]
+    # todo Exploration vs exploitation
+    if self.train:
+        if random.random() < self.epsilon:
+            self.logger.debug("Choosing action purely at random.")
+            # 80%: walk in any direction. 10% wait. 10% bomb.
+            return np.random.choice(ACTIONS)
+        else:
+            self.logger.debug(f"Querying model for action.:{best_action}")
+            return best_action
     else:
-        return np.random.choice(ACTIONS, p=[0.2, 0.2, 0.2, 0.2, 0.1, 0.1])
+        self.logger.debug(f"Querying model for action.:{best_action}")
+        return best_action
+
+
+# def choose_action(self, feature: List[str]) -> str:
+#     if 'KILL!' in feature:
+#         return 'BOMB'
+#     elif 'target' in feature:
+#         return ACTIONS[feature.index('target')]
+#     else:
+#         return np.random.choice(ACTIONS, p=[0.2, 0.2, 0.2, 0.2, 0.1, 0.1])
 
 
 

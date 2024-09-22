@@ -22,8 +22,8 @@ def setup_training(self):
     """
     self.epsilon = 1.0
     self.epsilon_min = 0.1
-    self.epsilon_decay = 0.999
-    self.gamma = 0.9
+    self.epsilon_decay = 0.9995
+    self.gamma = 0.6
     self.alpha = 0.1
     self.q_table = Table()
     try:
@@ -38,9 +38,12 @@ def learn(self, old_feature: List[str], self_action: str, new_feature: List[str]
     a0 = ACTIONS.index(self_action)
     Q_s0a0 = self.q_table[s0][a0]
     if len(new_feature):
+        # update q_table based on next action
+        new_action = choose_action(self, new_feature)
         s1 = feat2str(new_feature)
-        Q_s1a = max(self.q_table[s1])
-        delta = reward + self.gamma * Q_s1a - Q_s0a0
+        a1 = ACTIONS.index(new_action)
+        Q_s1a1 = self.q_table[s1][a1]
+        delta = reward + self.gamma * Q_s1a1 - Q_s0a0
     else: # End of the round
         delta = reward - Q_s0a0
     self.q_table[s0][a0] = Q_s0a0 + self.alpha * delta

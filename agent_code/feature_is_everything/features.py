@@ -1,5 +1,4 @@
 import numpy as np
-import random
 from collections import deque, defaultdict
 from typing import List, Dict
 import copy
@@ -301,34 +300,26 @@ class Feature:
                 enemy0_map[enemy0_pos[0], enemy0_pos[1]] = 1
 
         crate_map = self.find_crates_neighbors(field)
-        m_distance = np.abs(np.arange(crate_map.shape[0])[:, None] - x) + np.abs(np.arange(crate_map.shape[1]) - y)
-        indices = np.argwhere((crate_map > 0) & (m_distance <= s.BOMB_POWER))
-        # indices = np.argwhere((crate_map > 0))
+        indices = np.argwhere(crate_map > 0)
         for i, j in indices:
             crate_map[i, j] *= self.is_safe_to_drop_bomb((i, j))
 
-        # Initialize scores for actions that are safe
         score = {index: 0 for index in range(5) if safe[index]}
 
         # Calculate scores for each possible action
         for index in score:
             nx, ny = directions[index]
             distance = self.BFS(next_state, nx, ny)
-            adjusted_distance = distance + 1  # Avoid division by zero
+            adjusted_distance = distance + 1
 
-            # Calculate individual scores
             coins_score = weights['coins'] * (coin_map / adjusted_distance)
             enemy0_score = weights['enemy0'] * (enemy0_map / adjusted_distance)
             enemies_score = weights['enemies'] * (enemies_map / adjusted_distance)
             crates_score = weights['crates'] * (crate_map / adjusted_distance)
 
-            # Adjust crates_score based on safety to drop a bomb
-
-            # Sum up the total score
             total_score = np.sum(coins_score + enemy0_score + enemies_score + crates_score)
             score[index] += total_score
 
-            # Add escape weight if in danger
             score[index] += safe[index] * weights['escape']
 
         # Choose the action with the highest score
@@ -339,9 +330,9 @@ class Feature:
         # Handle the 'wait' action (index 4) and decide whether to drop a bomb
         if target == 4:
             if crate_map[x, y] > 0 and self.is_safe_to_drop_bomb((x, y)) and has_bomb:
-                target = 5  # Drop bomb action
+                target = 5
             else:
-                score[4] = -np.inf  # Exclude 'wait' from consideration
+                score[4] = -np.inf
                 if not any(score.values()):
                     return 4  # Default to 'wait' if no better options
                 max_score = max(score.values())

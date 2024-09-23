@@ -5,7 +5,6 @@ ROTATION_MAPPING = {
     270: {'UP': 'LEFT', 'RIGHT': 'UP', 'DOWN': 'RIGHT', 'LEFT': 'DOWN', 'WAIT': 'WAIT', 'BOMB': 'BOMB'},
 }
 
-# Action flipping mapping (for horizontal and vertical flips)
 VERTICAL_FLIP_MAPPING = {'UP': 'DOWN', 'RIGHT': 'RIGHT', 'DOWN': 'UP', 'LEFT': 'LEFT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
 HORIZONTAL_FLIP_MAPPING = {'UP': 'UP', 'RIGHT': 'LEFT', 'DOWN': 'DOWN', 'LEFT': 'RIGHT', 'WAIT': 'WAIT', 'BOMB': 'BOMB'}
 
@@ -26,13 +25,11 @@ def adjust_state(state, rotation=0, flip_horizontal=False, flip_vertical=False):
         return state
 
     direction_index = {'UP': 0, 'RIGHT': 1, 'DOWN': 2, 'LEFT': 3}
-    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']  # Define the initial order of directions before rotation
+    directions = ['UP', 'RIGHT', 'DOWN', 'LEFT']
 
-    # Normalize and apply clockwise rotation
-    rotation = (rotation // 90) % 4  # Normalize the rotation to one of 0, 1, 2, or 3
-    directions = directions[-rotation:] + directions[:-rotation]  # Rotate the list using slicing
+    rotation = (rotation // 90) % 4
+    directions = directions[-rotation:] + directions[:-rotation]
 
-    # Handle horizontal flip
     if flip_horizontal:
         directions[1], directions[3] = directions[3], directions[1]  # Swap 'RIGHT' and 'LEFT'
 
@@ -40,11 +37,10 @@ def adjust_state(state, rotation=0, flip_horizontal=False, flip_vertical=False):
     if flip_vertical:
         directions[0], directions[2] = directions[2], directions[0]  # Swap 'UP' and 'DOWN'
 
-    # Update the state according to the new direction list
     new_state = [0] * 6
     for i, dir in enumerate(directions):
         new_state[i] = state[direction_index[dir]]
-    new_state[4] = state[4]  # 'CENTER' remains unchanged
-    new_state[5] = state[5]  # 'BOMBS_LEFT' remains unchanged
+    new_state[4] = state[4]  # 'CENTER' unchanged
+    new_state[5] = state[5]  # 'BOMBS' unchanged
 
     return new_state

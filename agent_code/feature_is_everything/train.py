@@ -2,7 +2,6 @@ from typing import List
 from collections import deque
 import random
 import pickle
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -103,13 +102,6 @@ def optimize_model(self):
     # update target net
     if self.steps_done % self.update_target_steps == 0:
         self.target_net.load_state_dict(self.policy_net.state_dict())
-
-
-def check_row(A, row_index):
-    max_per_column = A.max(axis=0)
-    row = A[row_index]
-    is_max = row == max_per_column
-    return np.any(is_max) and not np.all(is_max)
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):

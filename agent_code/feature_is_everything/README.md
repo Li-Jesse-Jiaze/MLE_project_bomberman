@@ -1,5 +1,5 @@
 # DQN
 
-Feature: up right down left center 5 tile information with target (direction out of 5 tile) and bomb info.
+Feature: Information in ['up', 'right', 'down', 'left', 'center'] 5 tiles and about 'bomb'. Additional best target (out of 5 tiles). With one-hot encoding.
 
-Network: MLP with Value Stream and Advantage Stream.
+Network: A Dueling DQN with pure MLP.
